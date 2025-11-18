@@ -1,7 +1,8 @@
-module.exports = async (req, res) => {
+// /api/csv.js
+export default async function handler(req, res) {
   try {
     const name = String((req.query && req.query.name) || 'ctrl.csv')
-      .replace(/[^\w.\-]+/g, '_');
+      .replace(/[^\w\-]+/g, '_');
     const b64 = String((req.query && req.query.data) || '');
     if (!b64) {
       res.statusCode = 400;
@@ -18,4 +19,4 @@ module.exports = async (req, res) => {
     res.statusCode = 500;
     res.end('Error generating file');
   }
-};
+}
