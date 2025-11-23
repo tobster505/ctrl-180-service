@@ -57,14 +57,17 @@ async function readPayload(req) {
   if (req.method === "POST" && !q.data) {
     try {
       return typeof req.json === "function" ? await req.json() : (req.body || {});
-    } catch { /* ignore */ }
+    } catch {
+      // ignore; fall through to empty object
+    }
   }
   return {};
 }
 
-/* Simple TL text box */
+/* Simple TL text box (top-left origin) */
 function drawTextBox(page, font, text, spec = {}, opts = {}) {
   if (!page) return;
+
   const {
     x = 40,
     y = 40,
@@ -76,14 +79,14 @@ function drawTextBox(page, font, text, spec = {}, opts = {}) {
     h,
   } = spec;
 
+  const hard = norm(text || "");
+  if (!hard) return;
+
   const lineHeight = Math.max(1, size) + lineGap;
   const maxLines =
     opts.maxLines ??
     spec.maxLines ??
     (h ? Math.max(1, Math.floor(h / lineHeight)) : 20);
-
-  const hard = norm(text || "");
-  if (!hard) return;
 
   const lines = hard.split(/\n/).map((s) => s.trim());
   const wrapped = [];
@@ -94,8 +97,9 @@ function drawTextBox(page, font, text, spec = {}, opts = {}) {
     let cur = "";
     for (let i = 0; i < words.length; i++) {
       const nxt = cur ? `${cur} ${words[i]}` : words[i];
-      if (widthOf(nxt) <= w || !cur) cur = nxt;
-      else {
+      if (widthOf(nxt) <= w || !cur) {
+        cur = nxt;
+      } else {
         wrapped.push(cur);
         cur = words[i];
       }
@@ -113,16 +117,18 @@ function drawTextBox(page, font, text, spec = {}, opts = {}) {
   for (const ln of out) {
     let xDraw = x;
     const wLn = widthOf(ln);
-    if (align === "center") xDraw = x + (w - wLn) / 2;
-    else if (align === "right") xDraw = x + (w - wLn);
+
+    if (align === "center")      xDraw = x + (w - wLn) / 2;
+    else if (align === "right")  xDraw = x + (w - wLn);
 
     page.drawText(ln, {
-      x: xDraw,
-      y: yCursor - size,
+      x:    xDraw,
+      y:    yCursor - size,
       size: Math.max(1, size),
       font,
       color,
     });
+
     yCursor -= lineHeight;
   }
 }
@@ -130,7 +136,9 @@ function drawTextBox(page, font, text, spec = {}, opts = {}) {
 /* robust /public loader */
 async function loadTemplateBytesLocal(filename) {
   const fname = String(filename || "").trim();
-  if (!fname.endsWith(".pdf")) throw new Error(`Invalid template filename: ${fname}`);
+  if (!fname.endsWith(".pdf")) {
+    throw new Error(`Invalid template filename: ${fname}`);
+  }
 
   const __file = fileURLToPath(import.meta.url);
   const __dir  = path.dirname(__file);
@@ -144,10 +152,15 @@ async function loadTemplateBytesLocal(filename) {
 
   let lastErr;
   for (const pth of candidates) {
-    try { return await fs.readFile(pth); }
-    catch (err) { lastErr = err; }
+    try {
+      return await fs.readFile(pth);
+    } catch (err) {
+      lastErr = err;
+    }
   }
-  throw new Error(`Template not found for /public: ${fname} (${lastErr?.message || "no detail"})`);
+  throw new Error(
+    `Template not found for /public: ${fname} (${lastErr?.message || "no detail"})`
+  );
 }
 
 /* safe page getter */
@@ -156,20 +169,26 @@ const pageOrNull = (pages, idx0) => (pages[idx0] ?? null);
 /* ───────────── handler ───────────── */
 export default async function handler(req, res) {
   try {
-    const q   = req.method === "POST" ? (req.body || {}) : (req.query || {});
-    const defaultTpl = "CTRL_Perspective_Assessment_Profile_template_slim_180.pdf";
-    const tpl  = S(q.tpl || defaultTpl).replace(/[^A-Za-z0-9._-]/g, "");
-    const src  = await readPayload(req);
+    const q = req.method === "POST" ? (req.body || {}) : (req.query || {});
 
-    // expected payload from Make/Botpress (you can tweak names later)
+    const defaultTpl = "CTRL_Perspective_Assessment_Profile_template_slim_180.pdf";
+    const tpl        = S(q.tpl || defaultTpl).replace(/[^A-Za-z0-9._-]/g, "");
+
+    const src = await readPayload(req);
+
+    // Expected payload (from Botpress / Make):
+    // {
+    //   fullName, dateLbl,
+    //   summary, frequency, sequence, themepair, tipsActions
+    // }
     const P = {
-      name:       norm(src.fullName || src.person?.fullName || "Perspective Overlay"),
-      dateLbl:    norm(src.dateLbl || src.dateLabel || ""),
-      summary:    norm(src.summary || src.summary180 || src.overview || ""),
-      frequency:  norm(src.frequency || src.frequency180 || ""),
-      sequence:   norm(src.sequence || src.sequence180 || ""),
-      themepair:  norm(src.themepair || src.themeLens || ""),
-      tips:       norm(src.tipsActions || src.tips || src.actions || ""),
+      name:      norm(src.fullName || src.person?.fullName || "Perspective Overlay"),
+      dateLbl:   norm(src.dateLbl  || src.dateLabel || ""),
+      summary:   norm(src.summary  || src.summary180   || src.overview || ""),
+      frequency: norm(src.frequency || src.frequency180 || ""),
+      sequence:  norm(src.sequence  || src.sequence180  || ""),
+      themepair: norm(src.themepair || src.themeLens    || ""),
+      tips:      norm(src.tipsActions || src.tips || src.actions || ""),
     };
 
     const pdfBytes = await loadTemplateBytesLocal(tpl);
@@ -187,11 +206,20 @@ export default async function handler(req, res) {
 
     /* ───────────── layout anchors ───────────── */
     const L = {
-      header: { x: 380, y: 51, w: 400, size: 13, align: "left", maxLines: 1 },
+      // name in top-right header on p2–p7
+      header: {
+        x: 380,
+        y: 51,
+        w: 400,
+        size: 13,
+        align: "left",
+        maxLines: 1,
+      },
 
+      // p1 cover
       p1: {
         name: { x: 7,   y: 473, w: 500, size: 30, align: "center" },
-        date: { x: 210, y: 600, w: 500, size: 25, align: "left" },
+        date: { x: 210, y: 600, w: 500, size: 25, align: "left"  },
       },
 
       // p3 summary
@@ -220,7 +248,8 @@ export default async function handler(req, res) {
       },
     };
 
-    /* optional overrides via query: sum*, freq*, seq*, tp*, ta* */
+    // Optional coordinate overrides via query:
+    // ?sumx=&sumy=&sumw=&sums=&summax= etc.
     const overrideBox = (box, key) => {
       if (!box) return;
       if (q[`${key}x`]   != null) box.x        = N(q[`${key}x`],   box.x);
@@ -237,7 +266,7 @@ export default async function handler(req, res) {
     overrideBox(L.p6.theme,   "tp");
     overrideBox(L.p7.tips,    "ta");
 
-    /* ───────────── p1: name + date ───────────── */
+    /* ───────── p1: name + date ───────── */
     if (p1 && P.name)    drawTextBox(p1, font, P.name,    L.p1.name);
     if (p1 && P.dateLbl) drawTextBox(p1, font, P.dateLbl, L.p1.date);
 
@@ -248,7 +277,7 @@ export default async function handler(req, res) {
     };
     [p2, p3, p4, p5, p6, p7].forEach(putHeader);
 
-    /* content pages */
+    /* ───────── content pages ───────── */
     if (p3 && P.summary)   drawTextBox(p3, font, P.summary,   L.p3.summary);
     if (p4 && P.frequency) drawTextBox(p4, font, P.frequency, L.p4.freq);
     if (p5 && P.sequence)  drawTextBox(p5, font, P.sequence,  L.p5.seq);
@@ -261,6 +290,7 @@ export default async function handler(req, res) {
       q.out || `CTRL_180_${P.name || "Profile"}_${P.dateLbl || ""}.pdf`
     ).replace(/[^\w.-]+/g, "_");
 
+    res.statusCode = 200;
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${outName}"`);
     res.end(Buffer.from(bytes));
