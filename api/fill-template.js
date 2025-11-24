@@ -338,7 +338,7 @@ export default async function handler(req, res) {
       },
       // p6: themepair / theme lens
       p6: {
-        themepair: { x: 25, y: 150, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 }
+        themepair: { x: 25, y: 250, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 }
       },
       // p7: tips / actions
       p7: {
