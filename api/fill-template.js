@@ -151,6 +151,9 @@ function drawOverlayBox(page, fonts, text, spec = {}) {
   let   yCursor    = pageH - y;
   let   usedLines  = 0;
 
+  // base line height used for spacing and "fake blank lines"
+  const baseLineHeight = size + lineGap;
+
   const pushLine = (ln, { font, fSize, indent = 0 }) => {
     if (usedLines >= maxLines) return;
     const lineHeight = fSize + lineGap;
@@ -205,15 +208,17 @@ function drawOverlayBox(page, fonts, text, spec = {}) {
     const isBullet  = /^-\s+/.test(line);
 
     if (isHeading) {
-      // extra top gap before heading (except if very first)
-      yCursor -= 4;
-      pushLine(line.replace(/:\s*$/,":"), {
+      // BIG extra gap before any heading (≈ two blank lines)
+      yCursor -= baseLineHeight * 2;
+
+      pushLine(line.replace(/:\s*$/, ":"), {
         font: fontBold,
         fSize: size + 1,
         indent: 0
       });
-      // small gap after heading
-      yCursor -= 2;
+
+      // small extra gap after the heading
+      yCursor -= baseLineHeight * 0.5;
       continue;
     }
 
