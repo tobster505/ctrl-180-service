@@ -236,23 +236,24 @@ export default async function handler(req, res) {
       },
       // p3: summary
       p3: {
-        summary: { x: 25, y: 150, w: 550, size: 13, align: "left", maxLines: 100 }
+        // slightly larger font + more line gap for overlay content
+        summary: { x: 25, y: 150, w: 550, size: 14, lineGap: 5, align: "left", maxLines: 100 }
       },
       // p4: frequency
       p4: {
-        frequency: { x: 25, y: 150, w: 550, size: 13, align: "left", maxLines: 100 }
+        frequency: { x: 25, y: 150, w: 550, size: 14, lineGap: 5, align: "left", maxLines: 100 }
       },
       // p5: sequence
       p5: {
-        sequence: { x: 25, y: 150, w: 550, size: 13, align: "left", maxLines: 100 }
+        sequence: { x: 25, y: 150, w: 550, size: 14, lineGap: 5, align: "left", maxLines: 100 }
       },
       // p6: themepair / theme lens
       p6: {
-        themepair: { x: 25, y: 150, w: 550, size: 13, align: "left", maxLines: 100 }
+        themepair: { x: 25, y: 150, w: 550, size: 14, lineGap: 5, align: "left", maxLines: 100 }
       },
       // p7: tips / actions
       p7: {
-        tips: { x: 25, y: 150, w: 550, size: 13, align: "left", maxLines: 100 }
+        tips: { x: 25, y: 150, w: 550, size: 14, lineGap: 5, align: "left", maxLines: 100 }
       }
     };
 
