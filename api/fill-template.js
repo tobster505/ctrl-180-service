@@ -4,18 +4,6 @@
  *
  * Template:
  *   CTRL_Perspective_Assessment_Profile_template_slim_180.pdf
- *
- * Layout:
- *   p1: name/date (cover)
- *   p2: name header only
- *   p3: summary          (overlay summary)
- *   p4: frequency        (overlay frequency story)
- *   p5: sequence         (overlay sequence story)
- *   p6: themepair        (overlay theme lens)
- *   p7: tips/actions     (overlay tips / actions)
- *   p8: name header only
- *
- * Header: full name appears on pages 2–8.
  */
 
 export const config = { runtime: "nodejs" };
@@ -76,7 +64,7 @@ async function readPayload(req) {
   return {};
 }
 
-/* TL → simple textbox (does internal TL->BL conversion) */
+/* TL → simple textbox (used for headers, cover, etc.) */
 function drawTextBox(page, font, text, spec = {}, opts = {}) {
   if (!page) return;
   const {
@@ -87,7 +75,7 @@ function drawTextBox(page, font, text, spec = {}, opts = {}) {
     lineGap = 3,
     color = rgb(0, 0, 0),
     align = "left",
-    h,               // optional height for auto maxLines
+    h,
   } = spec;
 
   const lineHeight = Math.max(1, size) + lineGap;
@@ -139,6 +127,115 @@ function drawTextBox(page, font, text, spec = {}, opts = {}) {
   }
 }
 
+/* New: rich overlay drawer (bold headings like 'What this difference may mean:') */
+function drawOverlayBox(page, fonts, text, spec = {}) {
+  if (!page) return;
+  const fontReg  = fonts.reg;
+  const fontBold = fonts.bold;
+
+  const {
+    x = 40,
+    y = 40,
+    w = 540,
+    size = 15,        // base body size (larger than default)
+    lineGap = 6,
+    color = rgb(0, 0, 0),
+    align = "left",
+    maxLines = 120
+  } = spec;
+
+  const hard = norm(text || "");
+  if (!hard) return;
+
+  const pageH      = page.getHeight();
+  let   yCursor    = pageH - y;
+  let   usedLines  = 0;
+
+  const pushLine = (ln, { font, fSize, indent = 0 }) => {
+    if (usedLines >= maxLines) return;
+    const lineHeight = fSize + lineGap;
+    const widthOf    = (s) => font.widthOfTextAtSize(s, fSize);
+
+    // basic wrapping
+    const words = ln.split(/\s+/);
+    let current = "";
+    const segments = [];
+
+    for (let i = 0; i < words.length; i++) {
+      const next = current ? current + " " + words[i] : words[i];
+      if (widthOf(next) <= (w - indent) || !current) {
+        current = next;
+      } else {
+        segments.push(current);
+        current = words[i];
+      }
+    }
+    if (current) segments.push(current);
+
+    for (let s of segments) {
+      if (usedLines >= maxLines) break;
+      let xDraw = x + indent;
+      const wLn = widthOf(s);
+      if (align === "center") xDraw = x + (w - wLn) / 2;
+      else if (align === "right") xDraw = x + (w - wLn);
+
+      page.drawText(s, {
+        x: xDraw,
+        y: yCursor - fSize,
+        size: fSize,
+        font,
+        color,
+      });
+      yCursor  -= lineHeight;
+      usedLines++;
+    }
+  };
+
+  const rawLines = hard.split(/\n+/);
+
+  for (let raw of rawLines) {
+    const line = raw.trim();
+    if (!line) {
+      // blank line = extra spacing
+      yCursor -= size + lineGap;
+      continue;
+    }
+
+    const isHeading = /^what\b.*:\s*$/i.test(line);
+    const isBullet  = /^-\s+/.test(line);
+
+    if (isHeading) {
+      // extra top gap before heading (except if very first)
+      yCursor -= 4;
+      pushLine(line.replace(/:\s*$/,":"), {
+        font: fontBold,
+        fSize: size + 1,
+        indent: 0
+      });
+      // small gap after heading
+      yCursor -= 2;
+      continue;
+    }
+
+    if (isBullet) {
+      const content = line.replace(/^-\s+/, "• ");
+      pushLine(content, {
+        font: fontReg,
+        fSize: size,
+        indent: 10    // small indent for bullets
+      });
+      continue;
+    }
+
+    // normal paragraph text
+    pushLine(line, {
+      font: fontReg,
+      fSize: size,
+      indent: 0
+    });
+  }
+}
+
 /* robust /public template loader */
 async function loadTemplateBytesLocal(filename) {
   const fname = String(filename || "").trim();
@@ -171,22 +268,10 @@ export default async function handler(req, res) {
   try {
     const q = req.method === "POST" ? (req.body || {}) : (req.query || {});
 
-    // default to 180 template; allow ?tpl= override if needed
     const defaultTpl = "CTRL_Perspective_Assessment_Profile_template_slim_180.pdf";
     const tpl        = S(q.tpl || defaultTpl).replace(/[^A-Za-z0-9._-]/g, "");
     const src        = await readPayload(req);
 
-    // Expected payload from Botpress/Make:
-    // {
-    //   person: { fullName },
-    //   dateLbl,          // 23_NOV_2025
-    //   "p1:n", "p1:d",   // optional, for legacy
-    //   "p3:summary",
-    //   "p4:freq",
-    //   "p5:seq",
-    //   "p6:theme",
-    //   "p7:tips"
-    // }
     const P = {
       name:      norm(src?.person?.fullName || src?.["p1:n"] || src?.fullName || "Perspective Overlay"),
       dateLbl:   norm(src?.dateLbl || src?.["p1:d"] || ""),
@@ -198,17 +283,17 @@ export default async function handler(req, res) {
       tips:      norm(src?.tips      || src?.["p7:tips"]    || "")
     };
 
-    // Fallback: if dateLbl missing but p1:d has a human string, convert to label-like:
     if (!P.dateLbl && src?.["p1:d"]) {
       const human = norm(src["p1:d"]);
-      // crude: replace spaces with underscores, keep caps
-      P.dateLbl = human.replace(/\s+/g, "_").toUpperCase(); // "23_NOV_2025"
+      P.dateLbl = human.replace(/\s+/g, "_").toUpperCase();
     }
 
-    // load template
     const pdfBytes = await loadTemplateBytesLocal(tpl);
     const pdfDoc   = await PDFDocument.load(pdfBytes);
     const font     = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+    const fonts = { reg: font, bold: fontBold };
 
     const pages = pdfDoc.getPages();
     const p1 = pageOrNull(pages, 0);
@@ -220,7 +305,7 @@ export default async function handler(req, res) {
     const p7 = pageOrNull(pages, 6);
     const p8 = pageOrNull(pages, 7);
 
-    /* ───────────── layout anchors (defaults) ───────────── */
+    /* ───────── layout anchors ───────── */
     const L = {
       header: {
         x: 380,
@@ -236,28 +321,26 @@ export default async function handler(req, res) {
       },
       // p3: summary
       p3: {
-        // slightly larger font + more line gap for overlay content
-        summary: { x: 25, y: 150, w: 550, size: 14, lineGap: 5, align: "left", maxLines: 100 }
+        summary: { x: 25, y: 150, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 }
       },
       // p4: frequency
       p4: {
-        frequency: { x: 25, y: 150, w: 550, size: 14, lineGap: 5, align: "left", maxLines: 100 }
+        frequency: { x: 25, y: 150, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 }
       },
       // p5: sequence
       p5: {
-        sequence: { x: 25, y: 150, w: 550, size: 14, lineGap: 5, align: "left", maxLines: 100 }
+        sequence: { x: 25, y: 150, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 }
       },
       // p6: themepair / theme lens
       p6: {
-        themepair: { x: 25, y: 150, w: 550, size: 14, lineGap: 5, align: "left", maxLines: 100 }
+        themepair: { x: 25, y: 150, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 }
       },
       // p7: tips / actions
       p7: {
-        tips: { x: 25, y: 150, w: 550, size: 14, lineGap: 5, align: "left", maxLines: 100 }
+        tips: { x: 25, y: 150, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 }
       }
     };
 
-    /* ───────────── optional URL overrides (if you ever tweak) ───────────── */
     const overrideBox = (box, key) => {
       if (!box) return;
       if (q[`${key}x`]   != null) box.x        = N(q[`${key}x`],   box.x);
@@ -274,44 +357,26 @@ export default async function handler(req, res) {
     overrideBox(L.p6.themepair, "tp");
     overrideBox(L.p7.tips,      "tips");
 
-    /* ───────────── p1: full name & date ───────────── */
+    /* ───────── p1: full name & date ───────── */
     if (p1 && P.name)    drawTextBox(p1, font, P.name,    L.p1.name);
     if (p1 && P.dateLbl) drawTextBox(p1, font, P.dateLbl, L.p1.date);
 
-    /* ───────────── page headers (p2..p8) ───────────── */
+    /* ───────── page headers ───────── */
     const putHeader = (page) => {
       if (!page || !P.name) return;
       drawTextBox(page, font, P.name, L.header, { maxLines: 1 });
     };
     [p2, p3, p4, p5, p6, p7, p8].forEach(putHeader);
 
-    /* ───────────── p3: summary ───────────── */
-    if (p3 && P.summary) {
-      drawTextBox(p3, font, P.summary, L.p3.summary);
-    }
-
-    /* ───────────── p4: frequency ───────────── */
-    if (p4 && P.frequency) {
-      drawTextBox(p4, font, P.frequency, L.p4.frequency);
-    }
-
-    /* ───────────── p5: sequence ───────────── */
-    if (p5 && P.sequence) {
-      drawTextBox(p5, font, P.sequence, L.p5.sequence);
-    }
-
-    /* ───────────── p6: themepair ───────────── */
-    if (p6 && P.themepair) {
-      drawTextBox(p6, font, P.themepair, L.p6.themepair);
-    }
-
-    /* ───────────── p7: tips/actions ───────────── */
-    if (p7 && P.tips) {
-      drawTextBox(p7, font, P.tips, L.p7.tips);
-    }
+    /* ───────── p3–p7: rich overlay content ───────── */
+    if (p3 && P.summary)   drawOverlayBox(p3, fonts, P.summary,   L.p3.summary);
+    if (p4 && P.frequency) drawOverlayBox(p4, fonts, P.frequency, L.p4.frequency);
+    if (p5 && P.sequence)  drawOverlayBox(p5, fonts, P.sequence,  L.p5.sequence);
+    if (p6 && P.themepair) drawOverlayBox(p6, fonts, P.themepair, L.p6.themepair);
+    if (p7 && P.tips)      drawOverlayBox(p7, fonts, P.tips,      L.p7.tips);
 
     /* ───────── output ───────── */
-    const bytes = await pdfDoc.save();
+    const bytes   = await pdfDoc.save();
     const outName = S(
       q.out || `CTRL_180_${P.name || "Perspective"}_${P.dateLbl || ""}.pdf`
     ).replace(/[^\w.-]+/g, "_");
