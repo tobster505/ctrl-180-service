@@ -361,14 +361,14 @@ export default async function handler(req, res) {
       },
 
       // b) Page 2 chart stays the same
-      p2: {
-        chart: { x: 40, y: 170, w: 520, h: 360 }
+      p4: {
+        chart: { x: 250, y: 160, w: 320, h: 320 }
       },
 
       // c) Page 3 (180) = Page 4 on attached (exec summary area)
       // Using the primary big text region (exec2)
       p3: {
-        summary: { x: 25, y: 590, w: 550, size: 16, lineGap: 6, align: "left", maxLines: 22 }
+        summary: { x: 25, y: 390, w: 550, size: 16, lineGap: 6, align: "left", maxLines: 22 }
       },
 
       // d) Page 4 (180) = Page 5 on attached (overview main text region ov2)
