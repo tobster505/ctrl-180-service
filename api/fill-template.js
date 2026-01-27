@@ -65,7 +65,7 @@ const DEFAULT_LAYOUT = {
     },
 
     p4Text: {
-      frequency: { x: 25, y: 50, w: 150, h: 240, size: 16, align: "left", maxLines: 30 },
+      frequency: { x: 25, y: 80, w: 160, h: 240, size: 15, align: "left", maxLines: 30 },
       frequency2: { x: 25, y: 390, w: 550, h: 420, size: 16, align: "left", maxLines: 23 },
       chart: { x: 250, y: 160, w: 320, h: 320 }, // ✅ chart target (V3 uses this on Page 4)
     },
