@@ -1,5 +1,5 @@
 /**
- * CTRL 180 Export Service · fill-template
+ * CTRL 180 Export Service · fill-template (V2)
  * Path: /pages/api/fill-template.js  (ctrl-180-service)
  *
  * Templates live in:
@@ -10,6 +10,11 @@
  *
  * Only fallback allowed (when tpl missing/blank):
  *   CTRL_PoC_180_Assessment_Report_template_fallback.pdf
+ *
+ * V2 adds:
+ *  - payload.text / payload.textV2 support (for richer debug + future template expansion)
+ *  - ?debug=1 to return JSON diagnostics (no PDF)
+ *  - response headers for chart/template/payload tracing
  */
 
 export const config = { runtime: "nodejs" };
@@ -44,6 +49,9 @@ const norm = (v, fb = "") =>
     .replace(/[ \f\v]+/g, " ")
     .replace(/[ \t]+\n/g, "\n")
     .trim();
+
+const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+const kCount = (o) => (isObj(o) ? Object.keys(o).length : 0);
 
 /* ───────────── payload helpers ───────────── */
 function parseDataParam(b64ish) {
@@ -130,6 +138,7 @@ function drawOverlayBox(page, fonts, text, spec = {}) {
     maxLines = 120
   } = spec;
 
+  // IMPORTANT: keep \n intact; norm() already standardises newlines
   const hard = norm(text || "");
   if (!hard) return;
 
@@ -165,13 +174,14 @@ function drawOverlayBox(page, fonts, text, spec = {}) {
     }
   };
 
+  // Split by blank lines, preserving structure
   const rawLines = hard.split(/\n+/);
   for (let raw of rawLines) {
     const line = raw.trim();
     if (!line) { yCursor -= (size + lineGap); continue; }
 
     const isHeading = /^what\b.*:\s*$/i.test(line);
-    const isBullet  = /^-\s+/.test(line);
+    const isBullet  = /^-\s+/.test(line) || /^•\s+/.test(line);
 
     if (isHeading) {
       yCursor -= (size + lineGap) * 2;
@@ -181,7 +191,7 @@ function drawOverlayBox(page, fonts, text, spec = {}) {
     }
 
     if (isBullet) {
-      pushLine(line.replace(/^-\s+/, "• "), { font: fontReg, fSize: size, indent: 10 });
+      pushLine(line.replace(/^-\s+/, "• ").replace(/^•\s+/, "• "), { font: fontReg, fSize: size, indent: 10 });
       continue;
     }
 
@@ -224,12 +234,12 @@ async function fetchBytes(url, timeoutMs = 9000) {
 
   try {
     const r = await fetch(u, { signal: ctrl.signal });
-    if (!r.ok) return null;
+    if (!r.ok) return { ok:false, reason:`http_${r.status}`, url:u, contentType:"", bytes:null };
     const ct = (r.headers.get("content-type") || "").toLowerCase();
     const ab = await r.arrayBuffer();
-    return { bytes: new Uint8Array(ab), contentType: ct, url: u };
-  } catch {
-    return null;
+    return { ok:true, reason:"ok", url:u, contentType:ct, bytes:new Uint8Array(ab) };
+  } catch (e) {
+    return { ok:false, reason: String(e?.name || e?.message || "fetch_error"), url:u, contentType:"", bytes:null };
   } finally {
     clearTimeout(t);
   }
@@ -246,18 +256,24 @@ function looksJpg(u, ct = "") {
 
 /* ───────────── handler ───────────── */
 export default async function handler(req, res) {
+  let tpl = "";
+  let usingFallback = false;
+  let chartFetch = { ok:false, reason:"not_attempted", url:"", contentType:"", bytes:null };
+  let payloadSize = 0;
+
   try {
     const q = req.method === "POST" ? (req.body || {}) : (req.query || {});
+
+    // debug mode: return JSON not PDF (lets you inspect Vercel after)
+    const debugMode = String(q.debug || "").trim() === "1";
 
     // ✅ template selection: NO defaults. Only allowed fallback when tpl missing/blank.
     const FALLBACK_TPL = "CTRL_PoC_180_Assessment_Report_template_fallback.pdf";
 
-    let tpl = S(q.tpl || "").trim();
-
-    // strict sanitise (keeps file name safe)
+    tpl = S(q.tpl || "").trim();
     tpl = tpl.replace(/[^A-Za-z0-9._-]/g, "");
 
-    const usingFallback = !tpl;
+    usingFallback = !tpl;
     if (usingFallback) tpl = FALLBACK_TPL;
 
     // Load template (if supplied tpl is wrong → 400)
@@ -265,8 +281,10 @@ export default async function handler(req, res) {
 
     // Read payload
     const src = await readPayload(req);
+    payloadSize = Buffer.byteLength(JSON.stringify(src || {}), "utf8");
 
-    // Minimal fields this service writes
+    // Minimal fields this service writes (V1-compatible)
+    // V2: accepts src.text / src.textV2 for debugging/future expansion (but still renders the 5 blocks)
     const P = {
       name:      norm(src?.person?.fullName || src?.fullName || "Perspective Overlay"),
       dateLbl:   norm(src?.dateLbl || ""),
@@ -278,6 +296,10 @@ export default async function handler(req, res) {
       tips:      norm(src?.tips      || "")
     };
 
+    // Optional: capture “text v2” blocks for debug inspection
+    const TextV2 = isObj(src?.textV2) ? src.textV2 : null;
+    const Text   = isObj(src?.text)   ? src.text   : null;
+
     // Optional chart url (spider)
     const chartUrl = norm(
       src?.chartUrl ||
@@ -285,6 +307,37 @@ export default async function handler(req, res) {
       src?.chart?.spiderUrl ||
       ""
     );
+
+    // If debug=1, return a clean diagnostics packet (no pdf work)
+    if (debugMode) {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("X-CTRL-TPL", tpl);
+      res.setHeader("X-CTRL-TPL-FALLBACK", usingFallback ? "1" : "0");
+      res.setHeader("X-CTRL-DEBUG", "1");
+      res.status(200).end(JSON.stringify({
+        ok: true,
+        debug: true,
+        tpl,
+        usingFallback,
+        received: {
+          person: src?.person || null,
+          dateLbl: src?.dateLbl || null,
+          chartUrl: chartUrl || null,
+          hasText: !!Text,
+          textKeys: Text ? Object.keys(Text).slice(0, 60) : [],
+          hasTextV2: !!TextV2,
+          textV2Keys: TextV2 ? Object.keys(TextV2).slice(0, 60) : [],
+          fields: {
+            summary_len: P.summary.length,
+            frequency_len: P.frequency.length,
+            sequence_len: P.sequence.length,
+            themepair_len: P.themepair.length,
+            tips_len: P.tips.length
+          }
+        }
+      }, null, 2));
+      return;
+    }
 
     // Open PDF
     const pdfDoc   = await PDFDocument.load(pdfBytes);
@@ -338,17 +391,16 @@ export default async function handler(req, res) {
 
     // p2: chart image (optional)
     if (p2 && chartUrl) {
-      const fetched = await fetchBytes(chartUrl, 9000);
-      if (fetched && fetched.bytes && fetched.bytes.length) {
+      chartFetch = await fetchBytes(chartUrl, 9000);
+      if (chartFetch.ok && chartFetch.bytes && chartFetch.bytes.length) {
         let img = null;
-        if (looksPng(fetched.url, fetched.contentType)) img = await pdfDoc.embedPng(fetched.bytes);
-        else if (looksJpg(fetched.url, fetched.contentType)) img = await pdfDoc.embedJpg(fetched.bytes);
+        if (looksPng(chartFetch.url, chartFetch.contentType)) img = await pdfDoc.embedPng(chartFetch.bytes);
+        else if (looksJpg(chartFetch.url, chartFetch.contentType)) img = await pdfDoc.embedJpg(chartFetch.bytes);
 
         if (img) {
           const { x, y, w, h } = L.p2.chart;
           const pageH = p2.getHeight();
           const yBottom = pageH - y - h;
-
           p2.drawImage(img, { x, y: yBottom, width: w, height: h });
         }
       }
@@ -367,15 +419,29 @@ export default async function handler(req, res) {
       q.out || `CTRL_180_${P.name || "Perspective"}_${P.dateLbl || ""}.pdf`
     ).replace(/[^\w.-]+/g, "_");
 
-    // Optional: signal if fallback was used (helps debugging)
+    // Response headers for after-the-fact debugging
     res.setHeader("X-CTRL-TPL", tpl);
     res.setHeader("X-CTRL-TPL-FALLBACK", usingFallback ? "1" : "0");
+    res.setHeader("X-CTRL-PAYLOAD-SIZE", String(payloadSize || 0));
+    res.setHeader("X-CTRL-CHART", chartUrl ? "1" : "0");
+    res.setHeader("X-CTRL-CHART-FETCH", chartFetch?.ok ? "ok" : (chartFetch?.reason || "no"));
+    res.setHeader("X-CTRL-DEBUG", "0");
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${outName}"`);
     res.end(Buffer.from(bytes));
   } catch (err) {
     console.error("fill-template-180 error", err);
+
+    // extra debug headers even on error
+    try {
+      res.setHeader("X-CTRL-TPL", tpl || "");
+      res.setHeader("X-CTRL-TPL-FALLBACK", usingFallback ? "1" : "0");
+      res.setHeader("X-CTRL-PAYLOAD-SIZE", String(payloadSize || 0));
+      res.setHeader("X-CTRL-CHART-FETCH", chartFetch?.reason || "error");
+      res.setHeader("X-CTRL-DEBUG", "0");
+    } catch {}
+
     res.status(400).json({
       ok: false,
       error: `fill-template-180 error: ${err?.message || String(err)}`
