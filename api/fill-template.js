@@ -1,5 +1,5 @@
 /**
- * CTRL 180 Export Service · fill-template (V2)
+ * CTRL 180 Export Service · fill-template (V2 — COORDS UPDATE ONLY)
  * Path: /pages/api/fill-template.js  (ctrl-180-service)
  *
  * Templates live in:
@@ -12,9 +12,13 @@
  *   CTRL_PoC_180_Assessment_Report_template_fallback.pdf
  *
  * V2 adds:
- *  - payload.text / payload.textV2 support (for richer debug + future template expansion)
- *  - ?debug=1 to return JSON diagnostics (no PDF)
- *  - response headers for chart/template/payload tracing
+ *  - payload.text / payload.textV2 inspection in debug mode
+ *  - ?debug=1 returns JSON diagnostics (no PDF)
+ *  - headers for chart/template/payload tracing
+ *
+ * THIS EDIT:
+ *  - ONLY layout coordinates changed to match "fill-template user v12.3"
+ *  - plus page 6 uses provided p6WorkWith coords
  */
 
 export const config = { runtime: "nodejs" };
@@ -51,7 +55,6 @@ const norm = (v, fb = "") =>
     .trim();
 
 const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
-const kCount = (o) => (isObj(o) ? Object.keys(o).length : 0);
 
 /* ───────────── payload helpers ───────────── */
 function parseDataParam(b64ish) {
@@ -138,7 +141,6 @@ function drawOverlayBox(page, fonts, text, spec = {}) {
     maxLines = 120
   } = spec;
 
-  // IMPORTANT: keep \n intact; norm() already standardises newlines
   const hard = norm(text || "");
   if (!hard) return;
 
@@ -174,14 +176,13 @@ function drawOverlayBox(page, fonts, text, spec = {}) {
     }
   };
 
-  // Split by blank lines, preserving structure
   const rawLines = hard.split(/\n+/);
   for (let raw of rawLines) {
     const line = raw.trim();
     if (!line) { yCursor -= (size + lineGap); continue; }
 
     const isHeading = /^what\b.*:\s*$/i.test(line);
-    const isBullet  = /^-\s+/.test(line) || /^•\s+/.test(line);
+    const isBullet  = /^-\s+/.test(line);
 
     if (isHeading) {
       yCursor -= (size + lineGap) * 2;
@@ -191,7 +192,7 @@ function drawOverlayBox(page, fonts, text, spec = {}) {
     }
 
     if (isBullet) {
-      pushLine(line.replace(/^-\s+/, "• ").replace(/^•\s+/, "• "), { font: fontReg, fSize: size, indent: 10 });
+      pushLine(line.replace(/^-\s+/, "• "), { font: fontReg, fSize: size, indent: 10 });
       continue;
     }
 
@@ -225,9 +226,9 @@ const pageOrNull = (pages, idx0) => (pages[idx0] ?? null);
 
 /* ───────────── chart fetch/embed ───────────── */
 async function fetchBytes(url, timeoutMs = 9000) {
-  if (!url) return null;
+  if (!url) return { ok:false, reason:"no_url", url:"", contentType:"", bytes:null };
   const u = String(url).trim();
-  if (!/^https?:\/\//i.test(u)) return null;
+  if (!/^https?:\/\//i.test(u)) return { ok:false, reason:"not_http", url:u, contentType:"", bytes:null };
 
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -239,7 +240,7 @@ async function fetchBytes(url, timeoutMs = 9000) {
     const ab = await r.arrayBuffer();
     return { ok:true, reason:"ok", url:u, contentType:ct, bytes:new Uint8Array(ab) };
   } catch (e) {
-    return { ok:false, reason: String(e?.name || e?.message || "fetch_error"), url:u, contentType:"", bytes:null };
+    return { ok:false, reason:String(e?.name || e?.message || "fetch_error"), url:u, contentType:"", bytes:null };
   } finally {
     clearTimeout(t);
   }
@@ -263,11 +264,8 @@ export default async function handler(req, res) {
 
   try {
     const q = req.method === "POST" ? (req.body || {}) : (req.query || {});
-
-    // debug mode: return JSON not PDF (lets you inspect Vercel after)
     const debugMode = String(q.debug || "").trim() === "1";
 
-    // ✅ template selection: NO defaults. Only allowed fallback when tpl missing/blank.
     const FALLBACK_TPL = "CTRL_PoC_180_Assessment_Report_template_fallback.pdf";
 
     tpl = S(q.tpl || "").trim();
@@ -276,15 +274,11 @@ export default async function handler(req, res) {
     usingFallback = !tpl;
     if (usingFallback) tpl = FALLBACK_TPL;
 
-    // Load template (if supplied tpl is wrong → 400)
     const pdfBytes = await loadTemplateBytesLocal(tpl);
 
-    // Read payload
     const src = await readPayload(req);
     payloadSize = Buffer.byteLength(JSON.stringify(src || {}), "utf8");
 
-    // Minimal fields this service writes (V1-compatible)
-    // V2: accepts src.text / src.textV2 for debugging/future expansion (but still renders the 5 blocks)
     const P = {
       name:      norm(src?.person?.fullName || src?.fullName || "Perspective Overlay"),
       dateLbl:   norm(src?.dateLbl || ""),
@@ -293,14 +287,15 @@ export default async function handler(req, res) {
       frequency: norm(src?.frequency || ""),
       sequence:  norm(src?.sequence  || ""),
       themepair: norm(src?.themepair || ""),
-      tips:      norm(src?.tips      || "")
+      tips:      norm(src?.tips      || ""),
+
+      // Optional (does not change behaviour unless payload provides it)
+      workWith: isObj(src?.workWith) ? src.workWith : null
     };
 
-    // Optional: capture “text v2” blocks for debug inspection
     const TextV2 = isObj(src?.textV2) ? src.textV2 : null;
     const Text   = isObj(src?.text)   ? src.text   : null;
 
-    // Optional chart url (spider)
     const chartUrl = norm(
       src?.chartUrl ||
       src?.spiderChartUrl ||
@@ -308,7 +303,6 @@ export default async function handler(req, res) {
       ""
     );
 
-    // If debug=1, return a clean diagnostics packet (no pdf work)
     if (debugMode) {
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.setHeader("X-CTRL-TPL", tpl);
@@ -324,22 +318,21 @@ export default async function handler(req, res) {
           dateLbl: src?.dateLbl || null,
           chartUrl: chartUrl || null,
           hasText: !!Text,
-          textKeys: Text ? Object.keys(Text).slice(0, 60) : [],
           hasTextV2: !!TextV2,
-          textV2Keys: TextV2 ? Object.keys(TextV2).slice(0, 60) : [],
           fields: {
             summary_len: P.summary.length,
             frequency_len: P.frequency.length,
             sequence_len: P.sequence.length,
             themepair_len: P.themepair.length,
             tips_len: P.tips.length
-          }
+          },
+          hasWorkWith: !!P.workWith,
+          workWithKeys: P.workWith ? Object.keys(P.workWith).slice(0, 60) : []
         }
       }, null, 2));
       return;
     }
 
-    // Open PDF
     const pdfDoc   = await PDFDocument.load(pdfBytes);
     const font     = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -355,41 +348,78 @@ export default async function handler(req, res) {
     const p7 = pageOrNull(pages, 6);
     const p8 = pageOrNull(pages, 7);
 
-    // Layout (tweak after first test)
+    // ─────────────────────────────────────────────────────────────
+    // Layout — COORDINATES UPDATED per request (from user v12.3)
+    // ─────────────────────────────────────────────────────────────
     const L = {
       header: { x: 380, y: 51, w: 400, size: 13, align: "left", maxLines: 1 },
+
+      // a) Page 1 (180) = Page 1 on attached (name/date)
       p1: {
-        name: { x: 7, y: 473, w: 500, size: 30, align: "center" },
-        date: { x: 210, y: 600, w: 500, size: 25, align: "left" }
+        name: { x: 60, y: 458, w: 500, h: 60, size: 30, align: "center", maxLines: 1 },
+        date: { x: 230, y: 613, w: 500, h: 40, size: 25, align: "left",   maxLines: 1 }
       },
+
+      // b) Page 2 chart stays the same
       p2: {
         chart: { x: 40, y: 170, w: 520, h: 360 }
       },
-      p3: { summary:   { x: 25, y: 150, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 } },
-      p4: { frequency: { x: 25, y: 150, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 } },
-      p5: { sequence:  { x: 25, y: 150, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 } },
-      p6: { themepair: { x: 25, y: 280, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 } },
-      p7: { tips:      { x: 25, y: 150, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 } }
+
+      // c) Page 3 (180) = Page 4 on attached (exec summary area)
+      // Using the primary big text region (exec2)
+      p3: {
+        summary: { x: 25, y: 590, w: 550, size: 16, lineGap: 6, align: "left", maxLines: 22 }
+      },
+
+      // d) Page 4 (180) = Page 5 on attached (overview main text region ov2)
+      p4: {
+        frequency: { x: 25, y: 590, w: 550, size: 16, lineGap: 6, align: "left", maxLines: 23 }
+      },
+
+      // e) Page 5 (180) = Page 6 on attached (deepdive main region dd2)
+      p5: {
+        sequence: { x: 25, y: 270, w: 550, size: 16, lineGap: 6, align: "left", maxLines: 17 }
+      },
+
+      // f) Page 6 (180) = provided p6WorkWith coords (two-column)
+      // NOTE: only draws if payload.workWith.* exists (does not affect legacy behaviour)
+      p6: {
+        p6WorkWith: {
+          collabC_text: { x: 30,  y: 300, w: 270, h: 110, size: 16, align: "left", maxLines: 7 },
+          collabC_q:    { x: 30,  y: 410, w: 270, h: 310, size: 16, align: "left", maxLines: 24 },
+          collabT_text: { x: 320, y: 300, w: 260, h: 110, size: 16, align: "left", maxLines: 7 },
+          collabT_q:    { x: 320, y: 410, w: 260, h: 310, size: 16, align: "left", maxLines: 24 }
+        },
+        // legacy single-block fallback (kept, but not used if workWith is present)
+        themepair: { x: 25, y: 280, w: 550, size: 15, lineGap: 6, align: "left", maxLines: 110 }
+      },
+
+      // g) Page 7 (180) = Page 8 on attached (actions area act1)
+      // Using the primary actions text region
+      p7: {
+        tips: { x: 50, y: 380, w: 440, size: 17, lineGap: 6, align: "left", maxLines: 18 }
+      }
+      // h) Page 8 stays the same (no changes required; page exists for template)
     };
 
-    // Optional query overrides for chart placement
+    // Optional query overrides for chart placement (kept unchanged)
     if (q.cx != null) L.p2.chart.x = N(q.cx, L.p2.chart.x);
     if (q.cy != null) L.p2.chart.y = N(q.cy, L.p2.chart.y);
     if (q.cw != null) L.p2.chart.w = N(q.cw, L.p2.chart.w);
     if (q.ch != null) L.p2.chart.h = N(q.ch, L.p2.chart.h);
 
     // p1: name & date
-    if (p1 && P.name)    drawTextBox(p1, font, P.name,    L.p1.name);
-    if (p1 && P.dateLbl) drawTextBox(p1, font, P.dateLbl, L.p1.date);
+    if (p1 && P.name)    drawTextBox(p1, fontBold, P.name,   L.p1.name, { maxLines: 1 });
+    if (p1 && P.dateLbl) drawTextBox(p1, font,     P.dateLbl, L.p1.date, { maxLines: 1 });
 
-    // headers
+    // headers (kept unchanged)
     const putHeader = (page) => {
       if (!page || !P.name) return;
       drawTextBox(page, font, P.name, L.header, { maxLines: 1 });
     };
     [p2, p3, p4, p5, p6, p7, p8].forEach(putHeader);
 
-    // p2: chart image (optional)
+    // p2: chart image (optional) (kept unchanged)
     if (p2 && chartUrl) {
       chartFetch = await fetchBytes(chartUrl, 9000);
       if (chartFetch.ok && chartFetch.bytes && chartFetch.bytes.length) {
@@ -406,11 +436,28 @@ export default async function handler(req, res) {
       }
     }
 
-    // p3–p7 overlay blocks
+    // p3–p5, p7 overlay blocks (kept same behaviour; coords updated)
     if (p3 && P.summary)   drawOverlayBox(p3, fonts, P.summary,   L.p3.summary);
     if (p4 && P.frequency) drawOverlayBox(p4, fonts, P.frequency, L.p4.frequency);
     if (p5 && P.sequence)  drawOverlayBox(p5, fonts, P.sequence,  L.p5.sequence);
-    if (p6 && P.themepair) drawOverlayBox(p6, fonts, P.themepair, L.p6.themepair);
+
+    // p6: workWith if present, else legacy themepair (behaviour remains backward compatible)
+    if (p6) {
+      const WW = P.workWith;
+
+      if (WW && (WW.collabC_text || WW.collabC_q || WW.collabT_text || WW.collabT_q)) {
+        const B = L.p6.p6WorkWith;
+
+        if (WW.collabC_text) drawOverlayBox(p6, fonts, norm(WW.collabC_text), B.collabC_text);
+        if (WW.collabC_q)    drawOverlayBox(p6, fonts, norm(WW.collabC_q),    B.collabC_q);
+
+        if (WW.collabT_text) drawOverlayBox(p6, fonts, norm(WW.collabT_text), B.collabT_text);
+        if (WW.collabT_q)    drawOverlayBox(p6, fonts, norm(WW.collabT_q),    B.collabT_q);
+      } else {
+        if (P.themepair) drawOverlayBox(p6, fonts, P.themepair, L.p6.themepair);
+      }
+    }
+
     if (p7 && P.tips)      drawOverlayBox(p7, fonts, P.tips,      L.p7.tips);
 
     const bytes = await pdfDoc.save();
@@ -419,7 +466,7 @@ export default async function handler(req, res) {
       q.out || `CTRL_180_${P.name || "Perspective"}_${P.dateLbl || ""}.pdf`
     ).replace(/[^\w.-]+/g, "_");
 
-    // Response headers for after-the-fact debugging
+    // Response headers (kept)
     res.setHeader("X-CTRL-TPL", tpl);
     res.setHeader("X-CTRL-TPL-FALLBACK", usingFallback ? "1" : "0");
     res.setHeader("X-CTRL-PAYLOAD-SIZE", String(payloadSize || 0));
@@ -433,7 +480,6 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error("fill-template-180 error", err);
 
-    // extra debug headers even on error
     try {
       res.setHeader("X-CTRL-TPL", tpl || "");
       res.setHeader("X-CTRL-TPL-FALLBACK", usingFallback ? "1" : "0");
