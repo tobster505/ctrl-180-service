@@ -361,7 +361,7 @@ export default async function handler(req, res) {
       },
 
       // b) Page 2 chart stays the same
-      p4: {
+      p2: {
         chart: { x: 250, y: 160, w: 320, h: 320 }
       },
 
