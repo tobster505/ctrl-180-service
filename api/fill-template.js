@@ -454,7 +454,7 @@ export default async function handler(req, res) {
 
     // p4: frequency (big region) — chart now also on p4
     if (p4 && P.frequency) {
-      drawOverlayBox(p4, fonts, P.frequency, L.p4Text.frequency2);
+      drawOverlayBox(p4, fonts, P.frequency, L.p4Text.frequency);
     }
 
     // p5: sequence + theme
