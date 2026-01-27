@@ -1,5 +1,5 @@
 /**
- * CTRL 180 Export Service · fill-template (V2 — DEFAULT_LAYOUT COORDS)
+ * CTRL 180 Export Service · fill-template (V3 — CHART MOVED TO PAGE 4)
  * Path: /pages/api/fill-template.js  (ctrl-180-service)
  *
  * Required:
@@ -67,7 +67,7 @@ const DEFAULT_LAYOUT = {
     p4Text: {
       frequency: { x: 25, y: 160, w: 200, h: 240, size: 16, align: "left", maxLines: 30 },
       frequency2: { x: 25, y: 590, w: 550, h: 420, size: 16, align: "left", maxLines: 23 },
-      chart: { x: 250, y: 160, w: 320, h: 320 }, // not used in 180 (p2 chart stays)
+      chart: { x: 250, y: 160, w: 320, h: 320 }, // ✅ chart target (V3 uses this on Page 4)
     },
 
     p5Text: {
@@ -273,20 +273,19 @@ function looksJpg(u, ct = "") {
 
 /* ───────────── tiny helpers for page 6/7 splitting ───────────── */
 function combineWorkWithSide(WW, side) {
-  // Supports either:
-  // - WW.collabCol / WW.collabLe (new)
-  // - or legacy WW.collabC_text + WW.collabC_q etc (old)
   if (!isObj(WW)) return "";
 
+  // New shape
+  if (side === "C" && WW.collabCol) return norm(WW.collabCol);
+  if (side === "T" && WW.collabLe)  return norm(WW.collabLe);
+
+  // Legacy shape
   if (side === "C") {
-    if (WW.collabCol) return norm(WW.collabCol);
     const a = norm(WW.collabC_text || "");
     const b = norm(WW.collabC_q || "");
     return norm([a, b].filter(Boolean).join("\n\n"));
   }
-
   if (side === "T") {
-    if (WW.collabLe) return norm(WW.collabLe);
     const a = norm(WW.collabT_text || "");
     const b = norm(WW.collabT_q || "");
     return norm([a, b].filter(Boolean).join("\n\n"));
@@ -298,12 +297,9 @@ function combineWorkWithSide(WW, side) {
 function splitTipsInto3(tips) {
   const t = norm(tips || "");
   if (!t) return ["", "", ""];
-  // Prefer splitting on blank lines, else chunk by line count
   const parts = t.split(/\n{2,}/).map(s => s.trim()).filter(Boolean);
   const out = [parts[0] || "", parts[1] || "", parts[2] || ""];
   if (parts.length <= 3) return out;
-
-  // If more than 3, merge extras into last
   out[2] = norm([out[2], ...parts.slice(3)].filter(Boolean).join("\n\n"));
   return out;
 }
@@ -345,9 +341,7 @@ export default async function handler(req, res) {
       workWith: isObj(src?.workWith) ? src.workWith : null
     };
 
-    const TextV2 = isObj(src?.textV2) ? src.textV2 : null;
-    const Text   = isObj(src?.text)   ? src.text   : null;
-
+    const hasText = !!(isObj(src?.text) || isObj(src?.textV2));
     const chartUrl = norm(
       src?.chartUrl ||
       src?.spiderChartUrl ||
@@ -370,8 +364,7 @@ export default async function handler(req, res) {
           person: src?.person || null,
           dateLbl: src?.dateLbl || null,
           chartUrl: chartUrl || null,
-          hasText: !!Text,
-          hasTextV2: !!TextV2,
+          hasText,
           fields: {
             summary_len: P.summary.length,
             frequency_len: P.frequency.length,
@@ -402,7 +395,7 @@ export default async function handler(req, res) {
     const p1 = pageOrNull(pages, 0);
     const p2 = pageOrNull(pages, 1);
     const p3 = pageOrNull(pages, 2);
-    const p4 = pageOrNull(pages, 3);
+    const p4 = pageOrNull(pages, 3); // ✅ chart will render here in V3
     const p5 = pageOrNull(pages, 4);
     const p6 = pageOrNull(pages, 5);
     const p7 = pageOrNull(pages, 6);
@@ -410,18 +403,11 @@ export default async function handler(req, res) {
 
     const L = DEFAULT_LAYOUT.pages;
 
-    // Optional query overrides for chart placement (p2 chart stays the same behaviour)
-    const CHART = { x: 40, y: 170, w: 520, h: 360 };
-    if (q.cx != null) CHART.x = N(q.cx, CHART.x);
-    if (q.cy != null) CHART.y = N(q.cy, CHART.y);
-    if (q.cw != null) CHART.w = N(q.cw, CHART.w);
-    if (q.ch != null) CHART.h = N(q.ch, CHART.h);
-
-    // p1: name & date (from DEFAULT_LAYOUT)
+    // p1: name & date
     if (p1 && P.name)    drawTextBox(p1, fontBold, P.name,   L.p1.name, { maxLines: L.p1.name.maxLines ?? 1 });
     if (p1 && P.dateLbl) drawTextBox(p1, font,     P.dateLbl, L.p1.date, { maxLines: L.p1.date.maxLines ?? 1 });
 
-    // headers (p2–p8 all use their own hdrName from DEFAULT_LAYOUT)
+    // headers (p2–p8)
     const putHeader = (page, spec) => {
       if (!page || !P.name || !spec) return;
       drawTextBox(page, font, P.name, spec, { maxLines: spec.maxLines ?? 1 });
@@ -434,8 +420,18 @@ export default async function handler(req, res) {
     putHeader(p7, L.p7.hdrName);
     putHeader(p8, L.p8.hdrName);
 
-    // p2: chart image (optional)
-    if (p2 && chartUrl) {
+    // ─────────────────────────────────────────────────────────────
+    // ✅ V3 CHANGE: Chart moved to Page 4 using DEFAULT_LAYOUT.pages.p4Text.chart
+    // ─────────────────────────────────────────────────────────────
+    const CHART4 = { ...L.p4Text.chart };
+
+    // optional query overrides (kept)
+    if (q.cx != null) CHART4.x = N(q.cx, CHART4.x);
+    if (q.cy != null) CHART4.y = N(q.cy, CHART4.y);
+    if (q.cw != null) CHART4.w = N(q.cw, CHART4.w);
+    if (q.ch != null) CHART4.h = N(q.ch, CHART4.h);
+
+    if (p4 && chartUrl) {
       chartFetch = await fetchBytes(chartUrl, 9000);
       if (chartFetch.ok && chartFetch.bytes && chartFetch.bytes.length) {
         let img = null;
@@ -443,25 +439,25 @@ export default async function handler(req, res) {
         else if (looksJpg(chartFetch.url, chartFetch.contentType)) img = await pdfDoc.embedJpg(chartFetch.bytes);
 
         if (img) {
-          const { x, y, w, h } = CHART;
-          const pageH = p2.getHeight();
+          const { x, y, w, h } = CHART4;
+          const pageH = p4.getHeight();
           const yBottom = pageH - y - h;
-          p2.drawImage(img, { x, y: yBottom, width: w, height: h });
+          p4.drawImage(img, { x, y: yBottom, width: w, height: h });
         }
       }
     }
 
-    // p3: summary (DEFAULT_LAYOUT.pages.p3Text.summary)
+    // p3: summary
     if (p3 && P.summary) {
       drawOverlayBox(p3, fonts, P.summary, L.p3Text.summary);
     }
 
-    // p4: frequency (use frequency2 big region)
+    // p4: frequency (big region) — chart now also on p4
     if (p4 && P.frequency) {
       drawOverlayBox(p4, fonts, P.frequency, L.p4Text.frequency2);
     }
 
-    // p5: sequence + themepair (sequence box + theme box)
+    // p5: sequence + theme
     if (p5 && P.sequence) {
       drawOverlayBox(p5, fonts, P.sequence, L.p5Text.sequence);
     }
@@ -469,7 +465,7 @@ export default async function handler(req, res) {
       drawOverlayBox(p5, fonts, P.themepair, L.p5Text.theme);
     }
 
-    // p6: WorkWith (two columns) — supports both new + legacy payload shapes
+    // p6: WorkWith columns (only if payload provides workWith)
     if (p6) {
       const WW = P.workWith;
       const col = combineWorkWithSide(WW, "C");
@@ -479,7 +475,7 @@ export default async function handler(req, res) {
       if (le)  drawOverlayBox(p6, fonts, le,  L.p6WorkWith.collabLe);
     }
 
-    // p7: actions (split tips into 3 blocks)
+    // p7: actions (tips split into 3)
     if (p7 && P.tips) {
       const [act1, act2, act3] = splitTipsInto3(P.tips);
       if (act1) drawOverlayBox(p7, fonts, act1, L.p7Actions.act1);
@@ -492,12 +488,14 @@ export default async function handler(req, res) {
     const outName = S(q.out || `CTRL_180_${P.name || "Perspective"}_${P.dateLbl || ""}.pdf`)
       .replace(/[^\w.-]+/g, "_");
 
-    // Response headers (kept)
+    // Response headers
     res.setHeader("X-CTRL-TPL", tpl);
     res.setHeader("X-CTRL-TPL-FALLBACK", usingFallback ? "1" : "0");
     res.setHeader("X-CTRL-PAYLOAD-SIZE", String(payloadSize || 0));
     res.setHeader("X-CTRL-CHART", chartUrl ? "1" : "0");
+    res.setHeader("X-CTRL-CHART-TARGET", "p4");
     res.setHeader("X-CTRL-CHART-FETCH", chartFetch?.ok ? "ok" : (chartFetch?.reason || "no"));
+    res.setHeader("X-CTRL-WORKWITH", P.workWith ? "1" : "0");
     res.setHeader("X-CTRL-DEBUG", "0");
 
     res.setHeader("Content-Type", "application/pdf");
