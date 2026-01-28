@@ -66,8 +66,8 @@ const DEFAULT_LAYOUT = {
 
     // ✅ V5: replace old single-field flow with two explicit blobs
     p4Text: {
-      ctrl_overview:  { x: 25, y: 120,  w: 160, h: 240, size: 15, align: "left", maxLines: 30 },
-      ctrl_overviewQ: { x: 25, y: 450, w: 550, h: 420, size: 16, align: "left", maxLines: 23 },
+      ctrl_overview:  { x: 25, y: 140,  w: 160, h: 240, size: 15, align: "left", maxLines: 30 },
+      ctrl_overviewQ: { x: 25, y: 500, w: 550, h: 420, size: 16, align: "left", maxLines: 23 },
       chart: { x: 250, y: 160, w: 320, h: 320 }, // chart target (page 4)
     },
 
