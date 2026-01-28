@@ -245,20 +245,34 @@ function drawOverlayFromLines(page, font, lines, spec = {}) {
   if (!page || !lines || !lines.length) return;
 
   const {
-    x = 40, y = 40, w = 540,
-    size = 15, lineGap = 6,
+    x = 40, y = 40, w = 540, h,
+    size = 15,
+    lineGap: lg,
     color = rgb(0, 0, 0),
     align = "left",
-    maxLines = 120
+    maxLines
   } = spec;
 
-  const widthOf = (s) => font.widthOfTextAtSize(s, Math.max(1, size));
+  // Make gap deterministic + match the splitter logic
+  const lineGap = Number.isFinite(+lg) ? +lg : 6;
   const lineHeight = Math.max(1, size) + lineGap;
+
+  // If a height is provided, compute max lines by height
+  const maxByHeight = h ? Math.max(1, Math.floor(h / lineHeight)) : Infinity;
+
+  // Respect spec.maxLines too (whichever is smaller)
+  const cap =
+    Math.min(
+      Number.isFinite(+maxLines) ? +maxLines : Infinity,
+      maxByHeight
+    );
+
+  const widthOf = (s) => font.widthOfTextAtSize(s, Math.max(1, size));
 
   const pageH = page.getHeight();
   let yCursor = pageH - y;
 
-  const out = lines.slice(0, maxLines);
+  const out = lines.slice(0, cap);
 
   for (const ln of out) {
     if (!ln) { yCursor -= lineHeight; continue; }
@@ -268,10 +282,18 @@ function drawOverlayFromLines(page, font, lines, spec = {}) {
     if (align === "center") xDraw = x + (w - wLn) / 2;
     else if (align === "right") xDraw = x + (w - wLn);
 
-    page.drawText(ln, { x: xDraw, y: yCursor - size, size: Math.max(1, size), font, color });
+    page.drawText(ln, {
+      x: xDraw,
+      y: yCursor - size,
+      size: Math.max(1, size),
+      font,
+      color
+    });
+
     yCursor -= lineHeight;
   }
 }
+
 
 /* ───────────── template loader (NO silent fallback) ───────────── */
 async function loadTemplateBytesLocal(filename) {
@@ -505,27 +527,46 @@ export default async function handler(req, res) {
       drawOverlayBox(p3, fonts, P.summary, L.p3Text.summary);
     }
 
-    // p4: frequency (V4 auto-flow across frequency -> frequency2)
-    if (p4 && P.frequency) {
-      const spec1 = L.p4Text.frequency;   // narrow column
-      const spec2 = L.p4Text.frequency2;  // big box
+// p4: frequency (V4.1 — height-based auto-flow across frequency -> frequency2)
+if (p4 && P.frequency) {
+  const spec1 = L.p4Text.frequency;   // narrow column
+  const spec2 = L.p4Text.frequency2;  // lower box
 
-      // Wrap to box1 width/size
-      const allLines1 = wrapTextToLines(fonts.reg, P.frequency, spec1.w, spec1.size);
-      const cap1 = Number.isFinite(+spec1.maxLines) ? +spec1.maxLines : 30;
-      const firstLines = allLines1.slice(0, cap1);
-      const restLines  = allLines1.slice(firstLines.length);
+  // IMPORTANT: keep this lineGap value in sync with drawOverlayFromLines
+  const gap1 = Number.isFinite(+spec1.lineGap) ? +spec1.lineGap : 6;
+  const gap2 = Number.isFinite(+spec2.lineGap) ? +spec2.lineGap : 6;
 
-      drawOverlayFromLines(p4, fonts.reg, firstLines, spec1);
+  // Calculate how many lines ACTUALLY fit in the box height
+  const lineH1 = Math.max(1, spec1.size) + gap1;
+  const byH1 = spec1.h ? Math.max(1, Math.floor(spec1.h / lineH1)) : 9999;
+  const cap1 = Math.min(
+    Number.isFinite(+spec1.maxLines) ? +spec1.maxLines : 9999,
+    byH1
+  );
 
-      // Anything left goes into box2 (re-wrap to box2 width/size)
-      if (restLines.length) {
-        const restText = restLines.join("\n");
-        const allLines2 = wrapTextToLines(fonts.reg, restText, spec2.w, spec2.size);
-        const cap2 = Number.isFinite(+spec2.maxLines) ? +spec2.maxLines : 23;
-        drawOverlayFromLines(p4, fonts.reg, allLines2.slice(0, cap2), spec2);
-      }
-    }
+  const allLines1 = wrapTextToLines(fonts.reg, P.frequency, spec1.w, spec1.size);
+  const firstLines = allLines1.slice(0, cap1);
+  const restLines  = allLines1.slice(firstLines.length);
+
+  drawOverlayFromLines(p4, fonts.reg, firstLines, spec1);
+
+  if (restLines.length) {
+    // Optional but recommended: make it LOOK like a second block
+    const restText = ("WHAT TO REFLECT ON:\n\n" + restLines.join("\n")).trim();
+
+    const allLines2 = wrapTextToLines(fonts.reg, restText, spec2.w, spec2.size);
+
+    const lineH2 = Math.max(1, spec2.size) + gap2;
+    const byH2 = spec2.h ? Math.max(1, Math.floor(spec2.h / lineH2)) : 9999;
+    const cap2 = Math.min(
+      Number.isFinite(+spec2.maxLines) ? +spec2.maxLines : 9999,
+      byH2
+    );
+
+    drawOverlayFromLines(p4, fonts.reg, allLines2.slice(0, cap2), spec2);
+  }
+}
+
 
     // p5: sequence + theme
     if (p5 && P.sequence) {
