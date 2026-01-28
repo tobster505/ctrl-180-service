@@ -1,5 +1,5 @@
 /**
- * CTRL 180 Export Service · fill-template (V4 — Frequency auto-flow across 2 boxes)
+ * CTRL 180 Export Service · fill-template (V5 — ctrl_overview + ctrl_overviewQ as 2 clean blobs)
  * Path: /pages/api/fill-template.js  (ctrl-180-service)
  *
  * Required:
@@ -64,20 +64,21 @@ const DEFAULT_LAYOUT = {
       summary: { x: 25, y: 380, w: 550, h: 250, size: 16, align: "left", maxLines: 13 },
     },
 
+    // ✅ V5: replace old single-field flow with two explicit blobs
     p4Text: {
-      frequency: { x: 25, y: 80, w: 160, h: 240, size: 15, align: "left", maxLines: 30 },
-      frequency2: { x: 25, y: 390, w: 550, h: 420, size: 16, align: "left", maxLines: 23 },
+      ctrl_overview:  { x: 25, y: 80,  w: 160, h: 240, size: 15, align: "left", maxLines: 30 },
+      ctrl_overviewQ: { x: 25, y: 390, w: 550, h: 420, size: 16, align: "left", maxLines: 23 },
       chart: { x: 250, y: 160, w: 320, h: 320 }, // chart target (page 4)
     },
 
     p5Text: {
       sequence: { x: 25, y: 140, w: 550, h: 240, size: 16, align: "left", maxLines: 13 },
-      theme: { x: 25, y: 540, w: 550, h: 160, size: 16, align: "left", maxLines: 9 },
+      theme:    { x: 25, y: 540, w: 550, h: 160, size: 16, align: "left", maxLines: 9 },
     },
 
     p6WorkWith: {
-      collabCol: { x: 30, y: 300, w: 270, h: 420, size: 15, align: "left", maxLines: 14 },
-      collabLe: { x: 320, y: 300, w: 260, h: 420, size: 15, align: "left", maxLines: 14 },
+      collabCol: { x: 30,  y: 300, w: 270, h: 420, size: 15, align: "left", maxLines: 14 },
+      collabLe:  { x: 320, y: 300, w: 260, h: 420, size: 15, align: "left", maxLines: 14 },
     },
 
     p7Actions: {
@@ -216,85 +217,6 @@ function drawOverlayBox(page, fonts, text, spec = {}) {
   }
 }
 
-/* ───────────── V4 helpers: auto-flow text across 2 boxes ───────────── */
-function wrapTextToLines(font, text, w, size) {
-  const hard = norm(text || "");
-  if (!hard) return [];
-
-  const widthOf = (s) => font.widthOfTextAtSize(s, Math.max(1, size));
-  const rawLines = hard.split(/\n/);
-  const out = [];
-
-  for (const raw of rawLines) {
-    const ln = raw.trim();
-    if (!ln) { out.push(""); continue; } // preserve blank line spacing
-
-    const words = ln.split(/\s+/);
-    let cur = "";
-    for (let i = 0; i < words.length; i++) {
-      const nxt = cur ? `${cur} ${words[i]}` : words[i];
-      if (widthOf(nxt) <= w || !cur) cur = nxt;
-      else { out.push(cur); cur = words[i]; }
-    }
-    out.push(cur);
-  }
-  return out;
-}
-
-function drawOverlayFromLines(page, font, lines, spec = {}) {
-  if (!page || !lines || !lines.length) return;
-
-  const {
-    x = 40, y = 40, w = 540, h,
-    size = 15,
-    lineGap: lg,
-    color = rgb(0, 0, 0),
-    align = "left",
-    maxLines
-  } = spec;
-
-  // Make gap deterministic + match the splitter logic
-  const lineGap = Number.isFinite(+lg) ? +lg : 6;
-  const lineHeight = Math.max(1, size) + lineGap;
-
-  // If a height is provided, compute max lines by height
-  const maxByHeight = h ? Math.max(1, Math.floor(h / lineHeight)) : Infinity;
-
-  // Respect spec.maxLines too (whichever is smaller)
-  const cap =
-    Math.min(
-      Number.isFinite(+maxLines) ? +maxLines : Infinity,
-      maxByHeight
-    );
-
-  const widthOf = (s) => font.widthOfTextAtSize(s, Math.max(1, size));
-
-  const pageH = page.getHeight();
-  let yCursor = pageH - y;
-
-  const out = lines.slice(0, cap);
-
-  for (const ln of out) {
-    if (!ln) { yCursor -= lineHeight; continue; }
-
-    let xDraw = x;
-    const wLn = widthOf(ln);
-    if (align === "center") xDraw = x + (w - wLn) / 2;
-    else if (align === "right") xDraw = x + (w - wLn);
-
-    page.drawText(ln, {
-      x: xDraw,
-      y: yCursor - size,
-      size: Math.max(1, size),
-      font,
-      color
-    });
-
-    yCursor -= lineHeight;
-  }
-}
-
-
 /* ───────────── template loader (NO silent fallback) ───────────── */
 async function loadTemplateBytesLocal(filename) {
   const fname = String(filename || "").trim();
@@ -407,15 +329,19 @@ export default async function handler(req, res) {
     const src = await readPayload(req);
     payloadSize = Buffer.byteLength(JSON.stringify(src || {}), "utf8");
 
+    // Prefer textV2, then text, then top-level
+    const T = isObj(src?.textV2) ? src.textV2 : (isObj(src?.text) ? src.text : (isObj(src?.fields) ? src.fields : {}));
+
     const P = {
       name:      norm(src?.person?.fullName || src?.fullName || "Perspective Overlay"),
       dateLbl:   norm(src?.dateLbl || ""),
 
-      summary:   norm(src?.summary   || ""),
-      frequency: norm(src?.frequency || ""),
-      sequence:  norm(src?.sequence  || ""),
-      themepair: norm(src?.themepair || ""),
-      tips:      norm(src?.tips      || ""),
+      summary:        norm(T?.summary || src?.summary || ""),
+      ctrl_overview:  norm(T?.ctrl_overview || src?.ctrl_overview || ""),
+      ctrl_overviewQ: norm(T?.ctrl_overviewQ || src?.ctrl_overviewQ || ""),
+      sequence:       norm(T?.sequence || src?.sequence || ""),
+      themepair:      norm(T?.themepair || src?.themepair || ""),
+      tips:           norm(T?.tips || src?.tips || ""),
 
       workWith: isObj(src?.workWith) ? src.workWith : null
     };
@@ -430,10 +356,12 @@ export default async function handler(req, res) {
 
     if (debugMode) {
       const [a1,a2,a3] = splitTipsInto3(P.tips);
+
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.setHeader("X-CTRL-TPL", tpl);
       res.setHeader("X-CTRL-TPL-FALLBACK", usingFallback ? "1" : "0");
       res.setHeader("X-CTRL-DEBUG", "1");
+
       res.status(200).end(JSON.stringify({
         ok: true,
         debug: true,
@@ -446,7 +374,8 @@ export default async function handler(req, res) {
           hasText,
           fields: {
             summary_len: P.summary.length,
-            frequency_len: P.frequency.length,
+            ctrl_overview_len: P.ctrl_overview.length,
+            ctrl_overviewQ_len: P.ctrl_overviewQ.length,
             sequence_len: P.sequence.length,
             themepair_len: P.themepair.length,
             tips_len: P.tips.length
@@ -455,7 +384,7 @@ export default async function handler(req, res) {
           workWithKeys: P.workWith ? Object.keys(P.workWith).slice(0, 80) : [],
           page6Preview: {
             collabCol_len: combineWorkWithSide(P.workWith, "C").length,
-            collabLe_len: combineWorkWithSide(P.workWith, "T").length
+            collabLe_len:  combineWorkWithSide(P.workWith, "T").length
           },
           page7Preview: {
             act1_len: a1.length, act2_len: a2.length, act3_len: a3.length
@@ -483,7 +412,7 @@ export default async function handler(req, res) {
     const L = DEFAULT_LAYOUT.pages;
 
     // p1: name & date
-    if (p1 && P.name)    drawTextBox(p1, fontBold, P.name,   L.p1.name, { maxLines: L.p1.name.maxLines ?? 1 });
+    if (p1 && P.name)    drawTextBox(p1, fontBold, P.name,    L.p1.name, { maxLines: L.p1.name.maxLines ?? 1 });
     if (p1 && P.dateLbl) drawTextBox(p1, font,     P.dateLbl, L.p1.date, { maxLines: L.p1.date.maxLines ?? 1 });
 
     // headers (p2–p8)
@@ -527,46 +456,11 @@ export default async function handler(req, res) {
       drawOverlayBox(p3, fonts, P.summary, L.p3Text.summary);
     }
 
-// p4: frequency (V4.1 — height-based auto-flow across frequency -> frequency2)
-if (p4 && P.frequency) {
-  const spec1 = L.p4Text.frequency;   // narrow column
-  const spec2 = L.p4Text.frequency2;  // lower box
-
-  // IMPORTANT: keep this lineGap value in sync with drawOverlayFromLines
-  const gap1 = Number.isFinite(+spec1.lineGap) ? +spec1.lineGap : 6;
-  const gap2 = Number.isFinite(+spec2.lineGap) ? +spec2.lineGap : 6;
-
-  // Calculate how many lines ACTUALLY fit in the box height
-  const lineH1 = Math.max(1, spec1.size) + gap1;
-  const byH1 = spec1.h ? Math.max(1, Math.floor(spec1.h / lineH1)) : 9999;
-  const cap1 = Math.min(
-    Number.isFinite(+spec1.maxLines) ? +spec1.maxLines : 9999,
-    byH1
-  );
-
-  const allLines1 = wrapTextToLines(fonts.reg, P.frequency, spec1.w, spec1.size);
-  const firstLines = allLines1.slice(0, cap1);
-  const restLines  = allLines1.slice(firstLines.length);
-
-  drawOverlayFromLines(p4, fonts.reg, firstLines, spec1);
-
-  if (restLines.length) {
-    // Optional but recommended: make it LOOK like a second block
-    const restText = ("WHAT TO REFLECT ON:\n\n" + restLines.join("\n")).trim();
-
-    const allLines2 = wrapTextToLines(fonts.reg, restText, spec2.w, spec2.size);
-
-    const lineH2 = Math.max(1, spec2.size) + gap2;
-    const byH2 = spec2.h ? Math.max(1, Math.floor(spec2.h / lineH2)) : 9999;
-    const cap2 = Math.min(
-      Number.isFinite(+spec2.maxLines) ? +spec2.maxLines : 9999,
-      byH2
-    );
-
-    drawOverlayFromLines(p4, fonts.reg, allLines2.slice(0, cap2), spec2);
-  }
-}
-
+    // p4: ctrl_overview + ctrl_overviewQ (2 clean blobs, no auto-flow)
+    if (p4) {
+      if (P.ctrl_overview)  drawOverlayBox(p4, fonts, P.ctrl_overview,  L.p4Text.ctrl_overview);
+      if (P.ctrl_overviewQ) drawOverlayBox(p4, fonts, P.ctrl_overviewQ, L.p4Text.ctrl_overviewQ);
+    }
 
     // p5: sequence + theme
     if (p5 && P.sequence) {
