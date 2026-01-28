@@ -1,12 +1,10 @@
 /**
- * CTRL 180 Export Service · fill-template (V5 — ctrl_overview + ctrl_overviewQ as 2 clean blobs)
- * Path: /pages/api/fill-template.js  (ctrl-180-service)
+ * CTRL 180 Export Service · fill-template (V6.1 — coord overrides + split text/Q blocks + WorkWith = Gen-or-blank)
  *
- * Required:
- *   /api/fill-template?tpl=<filename.pdf>&data=<base64json>
- *
- * Only fallback allowed (when tpl missing/blank):
- *   CTRL_PoC_180_Assessment_Report_template_fallback.pdf
+ * ✅ Chart block is intentionally unchanged from your V5 (same fetch/embed + cx/cy/cw/ch overrides).
+ * ✅ Every text area supports per-box coordinate overrides (x/y/w/h/size/maxLines/align + dx/dy).
+ * ✅ Paragraph blocks + Question blocks are separate boxes (so you can move them independently).
+ * ✅ WorkWith will ONLY render if Gen provides it; otherwise page 6 stays blank (no fallbacks, no invention).
  */
 
 export const config = { runtime: "nodejs" };
@@ -44,7 +42,12 @@ const norm = (v, fb = "") =>
 
 const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
 
-/* ───────── DEFAULT LAYOUT (LOCKED IN) ───────── */
+const bullets = (arr = []) =>
+  arr.map((s) => norm(s || "")).filter(Boolean).map((s) => `- ${s}`).join("\n");
+
+const pageOrNull = (pages, idx0) => (pages[idx0] ?? null);
+
+/* ───────── DEFAULT LAYOUT (BASELINE) ───────── */
 const DEFAULT_LAYOUT = {
   pages: {
     p1: {
@@ -60,27 +63,46 @@ const DEFAULT_LAYOUT = {
     p7: { hdrName: { x: 380, y: 51, w: 400, h: 24, size: 13, align: "left", maxLines: 1 } },
     p8: { hdrName: { x: 380, y: 51, w: 400, h: 24, size: 13, align: "left", maxLines: 1 } },
 
+    // Page 3 — Exec Summary split into paragraph + questions (fallback to legacy block if needed)
     p3Text: {
-      summary: { x: 25, y: 380, w: 550, h: 250, size: 16, align: "left", maxLines: 13 },
+      exec_summary_text: { x: 25, y: 340, w: 550, h: 170, size: 16, align: "left", maxLines: 10 },
+      exec_summary_q:    { x: 25, y: 520, w: 550, h: 170, size: 16, align: "left", maxLines: 10 },
+      summary:           { x: 25, y: 380, w: 550, h: 250, size: 16, align: "left", maxLines: 13 }, // legacy
     },
 
-    // ✅ V5: replace old single-field flow with two explicit blobs
+    // Page 4 — Overview split + chart target (chart embed block stays unchanged)
     p4Text: {
-      ctrl_overview:  { x: 25, y: 160,  w: 170, h: 240, size: 15, align: "left", maxLines: 30 },
-      ctrl_overviewQ: { x: 25, y: 540, w: 550, h: 420, size: 16, align: "left", maxLines: 23 },
-      chart: { x: 250, y: 160, w: 320, h: 320 }, // chart target (page 4)
+      ctrl_overview_text: { x: 25, y: 160, w: 170, h: 240, size: 15, align: "left", maxLines: 30 },
+      ctrl_overview_q:    { x: 25, y: 540, w: 550, h: 420, size: 16, align: "left", maxLines: 23 },
+      chart: { x: 250, y: 160, w: 320, h: 320 },
     },
 
+    // Page 5 — Deepdive + Themes split (fallbacks kept)
     p5Text: {
-      sequence: { x: 25, y: 140, w: 550, h: 240, size: 16, align: "left", maxLines: 13 },
-      theme:    { x: 25, y: 540, w: 550, h: 160, size: 16, align: "left", maxLines: 9 },
+      sequence_text: { x: 25, y: 140, w: 550, h: 150, size: 16, align: "left", maxLines: 8 },
+      sequence_q:    { x: 25, y: 300, w: 550, h: 140, size: 16, align: "left", maxLines: 7 },
+
+      theme_text:    { x: 25, y: 540, w: 550, h: 80,  size: 16, align: "left", maxLines: 4 },
+      theme_q:       { x: 25, y: 625, w: 550, h: 120, size: 16, align: "left", maxLines: 6 },
+
+      sequence: { x: 25, y: 140, w: 550, h: 240, size: 16, align: "left", maxLines: 13 }, // legacy
+      theme:    { x: 25, y: 540, w: 550, h: 160, size: 16, align: "left", maxLines: 9 },  // legacy
     },
 
+    // Page 6 — WorkWith split, BUT we will only render if Gen provides it
     p6WorkWith: {
+      collabCol_text: { x: 30,  y: 260, w: 270, h: 170, size: 15, align: "left", maxLines: 6 },
+      collabCol_q:    { x: 30,  y: 440, w: 270, h: 280, size: 15, align: "left", maxLines: 10 },
+
+      collabLe_text:  { x: 320, y: 260, w: 260, h: 170, size: 15, align: "left", maxLines: 6 },
+      collabLe_q:     { x: 320, y: 440, w: 260, h: 280, size: 15, align: "left", maxLines: 10 },
+
+      // legacy combined (kept but NOT used in Gen-or-blank mode)
       collabCol: { x: 30,  y: 300, w: 270, h: 420, size: 15, align: "left", maxLines: 14 },
       collabLe:  { x: 320, y: 300, w: 260, h: 420, size: 15, align: "left", maxLines: 14 },
     },
 
+    // Page 7 — Actions (from tips split into 3)
     p7Actions: {
       act1: { x: 50,  y: 380, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
       act2: { x: 100, y: 530, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
@@ -217,7 +239,7 @@ function drawOverlayBox(page, fonts, text, spec = {}) {
   }
 }
 
-/* ───────────── template loader (NO silent fallback) ───────────── */
+/* ───────────── template loader ───────────── */
 async function loadTemplateBytesLocal(filename) {
   const fname = String(filename || "").trim();
   if (!fname.endsWith(".pdf")) throw new Error(`Invalid template filename: ${fname}`);
@@ -239,9 +261,7 @@ async function loadTemplateBytesLocal(filename) {
   throw new Error(`Template not found in /public: ${fname} (${lastErr?.message || "no detail"})`);
 }
 
-const pageOrNull = (pages, idx0) => (pages[idx0] ?? null);
-
-/* ───────────── chart fetch/embed ───────────── */
+/* ───────────── chart fetch/embed (UNCHANGED) ───────────── */
 async function fetchBytes(url, timeoutMs = 9000) {
   if (!url) return { ok:false, reason:"no_url", url:"", contentType:"", bytes:null };
   const u = String(url).trim();
@@ -272,29 +292,7 @@ function looksJpg(u, ct = "") {
   return ct.includes("jpeg") || ct.includes("jpg") || s.endsWith(".jpg") || s.endsWith(".jpeg") || s.includes(".jpg?") || s.includes(".jpeg?");
 }
 
-/* ───────────── tiny helpers for page 6/7 splitting ───────────── */
-function combineWorkWithSide(WW, side) {
-  if (!isObj(WW)) return "";
-
-  // New shape
-  if (side === "C" && WW.collabCol) return norm(WW.collabCol);
-  if (side === "T" && WW.collabLe)  return norm(WW.collabLe);
-
-  // Legacy shape
-  if (side === "C") {
-    const a = norm(WW.collabC_text || "");
-    const b = norm(WW.collabC_q || "");
-    return norm([a, b].filter(Boolean).join("\n\n"));
-  }
-  if (side === "T") {
-    const a = norm(WW.collabT_text || "");
-    const b = norm(WW.collabT_q || "");
-    return norm([a, b].filter(Boolean).join("\n\n"));
-  }
-
-  return "";
-}
-
+/* ───────────── split helpers ───────────── */
 function splitTipsInto3(tips) {
   const t = norm(tips || "");
   if (!t) return ["", "", ""];
@@ -303,6 +301,73 @@ function splitTipsInto3(tips) {
   if (parts.length <= 3) return out;
   out[2] = norm([out[2], ...parts.slice(3)].filter(Boolean).join("\n\n"));
   return out;
+}
+
+/* ───────────── layout override engine ───────────── */
+function applyBoxOverrides(spec, q, id) {
+  const out = { ...(spec || {}) };
+
+  // delta shifts
+  if (q[`${id}_dx`] != null) out.x = N(out.x, 0) + N(q[`${id}_dx`], 0);
+  if (q[`${id}_dy`] != null) out.y = N(out.y, 0) + N(q[`${id}_dy`], 0);
+
+  // absolute overrides
+  if (q[`${id}_x`] != null) out.x = N(q[`${id}_x`], out.x);
+  if (q[`${id}_y`] != null) out.y = N(q[`${id}_y`], out.y);
+  if (q[`${id}_w`] != null) out.w = N(q[`${id}_w`], out.w);
+  if (q[`${id}_h`] != null) out.h = N(q[`${id}_h`], out.h);
+  if (q[`${id}_size`] != null) out.size = N(q[`${id}_size`], out.size);
+  if (q[`${id}_lineGap`] != null) out.lineGap = N(q[`${id}_lineGap`], out.lineGap);
+  if (q[`${id}_maxLines`] != null) out.maxLines = N(q[`${id}_maxLines`], out.maxLines);
+  if (q[`${id}_align`] != null) out.align = String(q[`${id}_align`]);
+
+  return out;
+}
+
+function buildLayoutWithOverrides(q) {
+  const L = JSON.parse(JSON.stringify(DEFAULT_LAYOUT));
+  const P = L.pages;
+
+  P.p1.name = applyBoxOverrides(P.p1.name, q, "p1_name");
+  P.p1.date = applyBoxOverrides(P.p1.date, q, "p1_date");
+
+  for (let i = 2; i <= 8; i++) {
+    const k = `p${i}`;
+    P[k].hdrName = applyBoxOverrides(P[k].hdrName, q, `p${i}_hdrName`);
+  }
+
+  // p3
+  P.p3Text.exec_summary_text = applyBoxOverrides(P.p3Text.exec_summary_text, q, "p3_exec_summary_text");
+  P.p3Text.exec_summary_q    = applyBoxOverrides(P.p3Text.exec_summary_q,    q, "p3_exec_summary_q");
+  P.p3Text.summary           = applyBoxOverrides(P.p3Text.summary,           q, "p3_summary");
+
+  // p4
+  P.p4Text.ctrl_overview_text = applyBoxOverrides(P.p4Text.ctrl_overview_text, q, "p4_ctrl_overview_text");
+  P.p4Text.ctrl_overview_q    = applyBoxOverrides(P.p4Text.ctrl_overview_q,    q, "p4_ctrl_overview_q");
+  // chart stays controlled by cx/cy/cw/ch (see chart block)
+
+  // p5
+  P.p5Text.sequence_text = applyBoxOverrides(P.p5Text.sequence_text, q, "p5_sequence_text");
+  P.p5Text.sequence_q    = applyBoxOverrides(P.p5Text.sequence_q,    q, "p5_sequence_q");
+  P.p5Text.theme_text    = applyBoxOverrides(P.p5Text.theme_text,    q, "p5_theme_text");
+  P.p5Text.theme_q       = applyBoxOverrides(P.p5Text.theme_q,       q, "p5_theme_q");
+  P.p5Text.sequence      = applyBoxOverrides(P.p5Text.sequence,      q, "p5_sequence");
+  P.p5Text.theme         = applyBoxOverrides(P.p5Text.theme,         q, "p5_theme");
+
+  // p6
+  P.p6WorkWith.collabCol_text = applyBoxOverrides(P.p6WorkWith.collabCol_text, q, "p6_collabCol_text");
+  P.p6WorkWith.collabCol_q    = applyBoxOverrides(P.p6WorkWith.collabCol_q,    q, "p6_collabCol_q");
+  P.p6WorkWith.collabLe_text  = applyBoxOverrides(P.p6WorkWith.collabLe_text,  q, "p6_collabLe_text");
+  P.p6WorkWith.collabLe_q     = applyBoxOverrides(P.p6WorkWith.collabLe_q,     q, "p6_collabLe_q");
+  P.p6WorkWith.collabCol      = applyBoxOverrides(P.p6WorkWith.collabCol,      q, "p6_collabCol");
+  P.p6WorkWith.collabLe       = applyBoxOverrides(P.p6WorkWith.collabLe,       q, "p6_collabLe");
+
+  // p7
+  P.p7Actions.act1 = applyBoxOverrides(P.p7Actions.act1, q, "p7_act1");
+  P.p7Actions.act2 = applyBoxOverrides(P.p7Actions.act2, q, "p7_act2");
+  P.p7Actions.act3 = applyBoxOverrides(P.p7Actions.act3, q, "p7_act3");
+
+  return L;
 }
 
 /* ───────────── handler ───────────── */
@@ -329,24 +394,52 @@ export default async function handler(req, res) {
     const src = await readPayload(req);
     payloadSize = Buffer.byteLength(JSON.stringify(src || {}), "utf8");
 
-    // Prefer textV2, then text, then top-level
+    // Prefer textV2, then text, then fields, then top-level
     const T = isObj(src?.textV2) ? src.textV2 : (isObj(src?.text) ? src.text : (isObj(src?.fields) ? src.fields : {}));
+    const G = isObj(src?.gen) ? src.gen : {};
+
+    // STRICT WorkWith from Gen (or blank)
+    const wwColText = norm(G?.adapt_with_colleagues || "");
+    const wwColQ    = bullets([G?.adapt_with_colleagues_q1, G?.adapt_with_colleagues_q2]);
+    const wwLeText  = norm(G?.adapt_with_leaders || "");
+    const wwLeQ     = bullets([G?.adapt_with_leaders_q1, G?.adapt_with_leaders_q2]);
+    const hasWW = !!(wwColText || wwColQ || wwLeText || wwLeQ);
+    const workWithBuilt = hasWW ? {
+      collabCol_text: wwColText,
+      collabCol_q:    wwColQ,
+      collabLe_text:  wwLeText,
+      collabLe_q:     wwLeQ
+    } : null;
 
     const P = {
-      name:      norm(src?.person?.fullName || src?.fullName || "Perspective Overlay"),
-      dateLbl:   norm(src?.dateLbl || ""),
+      name:    norm(src?.person?.fullName || src?.fullName || "Perspective Overlay"),
+      dateLbl: norm(src?.dateLbl || ""),
 
-      summary:        norm(T?.summary || src?.summary || ""),
-      ctrl_overview:  norm(T?.ctrl_overview || src?.ctrl_overview || ""),
-      ctrl_overviewQ: norm(T?.ctrl_overviewQ || src?.ctrl_overviewQ || ""),
-      sequence:       norm(T?.sequence || src?.sequence || ""),
-      themepair:      norm(T?.themepair || src?.themepair || ""),
-      tips:           norm(T?.tips || src?.tips || ""),
+      // Legacy blocks (still supported)
+      summary:   norm(T?.summary   || src?.summary   || ""),
+      sequence:  norm(T?.sequence  || src?.sequence  || ""),
+      themepair: norm(T?.themepair || src?.themepair || ""),
+      tips:      norm(T?.tips      || src?.tips      || ""),
 
-      workWith: isObj(src?.workWith) ? src.workWith : null
+      // Split blocks (prefer gen pack)
+      exec_summary_text: norm(G?.exec_summary || ""),
+      exec_summary_q:    bullets([G?.exec_summary_q1, G?.exec_summary_q2, G?.exec_summary_q3, G?.exec_summary_q4]),
+
+      ctrl_overview_text: norm(G?.ctrl_overview || norm(T?.ctrl_overview || src?.ctrl_overview || "")),
+      ctrl_overview_q:    bullets([G?.ctrl_overview_q1, G?.ctrl_overview_q2, G?.ctrl_overview_q3, G?.ctrl_overview_q4]) ||
+                          norm(T?.ctrl_overviewQ || src?.ctrl_overviewQ || ""), // legacy (safe)
+
+      sequence_text: norm(G?.ctrl_deepdive || ""),
+      sequence_q:    bullets([G?.ctrl_deepdive_q1, G?.ctrl_deepdive_q2]),
+
+      theme_text: norm(G?.themes || ""),
+      theme_q:    bullets([G?.themes_q1, G?.themes_q2]),
+
+      // WorkWith STRICT: Gen or blank only
+      workWithBuilt
     };
 
-    const hasText = !!(isObj(src?.text) || isObj(src?.textV2));
+    const hasText = !!(isObj(src?.text) || isObj(src?.textV2) || isObj(src?.gen));
     const chartUrl = norm(
       src?.chartUrl ||
       src?.spiderChartUrl ||
@@ -354,8 +447,18 @@ export default async function handler(req, res) {
       ""
     );
 
+    // Layout (with overrides)
+    const L = buildLayoutWithOverrides(q).pages;
+
+    // DEBUG JSON response
     if (debugMode) {
       const [a1,a2,a3] = splitTipsInto3(P.tips);
+
+      const built = isObj(P.workWithBuilt) ? P.workWithBuilt : null;
+      const wwCol  = built ? (built.collabCol_text || "") : "";
+      const wwColQ = built ? (built.collabCol_q || "")    : "";
+      const wwLe   = built ? (built.collabLe_text || "")  : "";
+      const wwLeQ  = built ? (built.collabLe_q || "")     : "";
 
       res.setHeader("Content-Type", "application/json; charset=utf-8");
       res.setHeader("X-CTRL-TPL", tpl);
@@ -373,27 +476,48 @@ export default async function handler(req, res) {
           chartUrl: chartUrl || null,
           hasText,
           fields: {
+            // legacy
             summary_len: P.summary.length,
-            ctrl_overview_len: P.ctrl_overview.length,
-            ctrl_overviewQ_len: P.ctrl_overviewQ.length,
             sequence_len: P.sequence.length,
             themepair_len: P.themepair.length,
-            tips_len: P.tips.length
+            tips_len: P.tips.length,
+
+            // split
+            exec_summary_text_len: P.exec_summary_text.length,
+            exec_summary_q_len: P.exec_summary_q.length,
+            ctrl_overview_text_len: P.ctrl_overview_text.length,
+            ctrl_overview_q_len: P.ctrl_overview_q.length,
+            sequence_text_len: P.sequence_text.length,
+            sequence_q_len: P.sequence_q.length,
+            theme_text_len: P.theme_text.length,
+            theme_q_len: P.theme_q.length,
           },
-          hasWorkWith: !!P.workWith,
-          workWithKeys: P.workWith ? Object.keys(P.workWith).slice(0, 80) : [],
+          hasWorkWith: !!(wwCol || wwLe || wwColQ || wwLeQ),
           page6Preview: {
-            collabCol_len: combineWorkWithSide(P.workWith, "C").length,
-            collabLe_len:  combineWorkWithSide(P.workWith, "T").length
+            collabCol_text_len: wwCol.length,
+            collabCol_q_len: wwColQ.length,
+            collabLe_text_len: wwLe.length,
+            collabLe_q_len: wwLeQ.length
           },
           page7Preview: {
             act1_len: a1.length, act2_len: a2.length, act3_len: a3.length
+          },
+          layoutPreview: {
+            p3_exec_summary_text: L.p3Text.exec_summary_text,
+            p3_exec_summary_q: L.p3Text.exec_summary_q,
+            p4_ctrl_overview_text: L.p4Text.ctrl_overview_text,
+            p4_ctrl_overview_q: L.p4Text.ctrl_overview_q,
+            p6_collabCol_text: L.p6WorkWith.collabCol_text,
+            p6_collabCol_q: L.p6WorkWith.collabCol_q,
+            p6_collabLe_text: L.p6WorkWith.collabLe_text,
+            p6_collabLe_q: L.p6WorkWith.collabLe_q
           }
         }
       }, null, 2));
       return;
     }
 
+    // Normal PDF render
     const pdfDoc   = await PDFDocument.load(pdfBytes);
     const font     = await pdfDoc.embedFont(StandardFonts.Helvetica);
     const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -408,8 +532,6 @@ export default async function handler(req, res) {
     const p6 = pageOrNull(pages, 5);
     const p7 = pageOrNull(pages, 6);
     const p8 = pageOrNull(pages, 7);
-
-    const L = DEFAULT_LAYOUT.pages;
 
     // p1: name & date
     if (p1 && P.name)    drawTextBox(p1, fontBold, P.name,    L.p1.name, { maxLines: L.p1.name.maxLines ?? 1 });
@@ -428,7 +550,9 @@ export default async function handler(req, res) {
     putHeader(p7, L.p7.hdrName);
     putHeader(p8, L.p8.hdrName);
 
-    // chart on page 4
+    // ─────────────────────────────────────────────────────────────
+    // chart on page 4  ✅ UNCHANGED BLOCK
+    // ─────────────────────────────────────────────────────────────
     const CHART4 = { ...L.p4Text.chart };
     if (q.cx != null) CHART4.x = N(q.cx, CHART4.x);
     if (q.cy != null) CHART4.y = N(q.cy, CHART4.y);
@@ -451,33 +575,57 @@ export default async function handler(req, res) {
       }
     }
 
-    // p3: summary
-    if (p3 && P.summary) {
-      drawOverlayBox(p3, fonts, P.summary, L.p3Text.summary);
+    // p3: summary (prefer split; fallback to legacy block)
+    if (p3) {
+      const hasSplit = !!(P.exec_summary_text || P.exec_summary_q);
+      if (hasSplit) {
+        if (P.exec_summary_text) drawOverlayBox(p3, fonts, P.exec_summary_text, L.p3Text.exec_summary_text);
+        if (P.exec_summary_q)    drawOverlayBox(p3, fonts, P.exec_summary_q,    L.p3Text.exec_summary_q);
+      } else if (P.summary) {
+        drawOverlayBox(p3, fonts, P.summary, L.p3Text.summary);
+      }
     }
 
-    // p4: ctrl_overview + ctrl_overviewQ (2 clean blobs, no auto-flow)
+    // p4: overview (split)
     if (p4) {
-      if (P.ctrl_overview)  drawOverlayBox(p4, fonts, P.ctrl_overview,  L.p4Text.ctrl_overview);
-      if (P.ctrl_overviewQ) drawOverlayBox(p4, fonts, P.ctrl_overviewQ, L.p4Text.ctrl_overviewQ);
+      if (P.ctrl_overview_text) drawOverlayBox(p4, fonts, P.ctrl_overview_text, L.p4Text.ctrl_overview_text);
+      if (P.ctrl_overview_q)    drawOverlayBox(p4, fonts, P.ctrl_overview_q,    L.p4Text.ctrl_overview_q);
     }
 
-    // p5: sequence + theme
-    if (p5 && P.sequence) {
-      drawOverlayBox(p5, fonts, P.sequence, L.p5Text.sequence);
-    }
-    if (p5 && P.themepair) {
-      drawOverlayBox(p5, fonts, P.themepair, L.p5Text.theme);
+    // p5: deepdive + themes (prefer split; fallback to legacy)
+    if (p5) {
+      const hasSeqSplit = !!(P.sequence_text || P.sequence_q);
+      if (hasSeqSplit) {
+        if (P.sequence_text) drawOverlayBox(p5, fonts, P.sequence_text, L.p5Text.sequence_text);
+        if (P.sequence_q)    drawOverlayBox(p5, fonts, P.sequence_q,    L.p5Text.sequence_q);
+      } else if (P.sequence) {
+        drawOverlayBox(p5, fonts, P.sequence, L.p5Text.sequence);
+      }
+
+      const hasThemeSplit = !!(P.theme_text || P.theme_q);
+      if (hasThemeSplit) {
+        if (P.theme_text) drawOverlayBox(p5, fonts, P.theme_text, L.p5Text.theme_text);
+        if (P.theme_q)    drawOverlayBox(p5, fonts, P.theme_q,    L.p5Text.theme_q);
+      } else if (P.themepair) {
+        drawOverlayBox(p5, fonts, P.themepair, L.p5Text.theme);
+      }
     }
 
-    // p6: WorkWith columns (only if payload provides workWith)
+    // p6: WorkWith (STRICT: Gen or blank only)
     if (p6) {
-      const WW = P.workWith;
-      const col = combineWorkWithSide(WW, "C");
-      const le  = combineWorkWithSide(WW, "T");
+      const built = isObj(P.workWithBuilt) ? P.workWithBuilt : null;
+      if (built) {
+        const colText = norm(built.collabCol_text || "");
+        const colQ    = norm(built.collabCol_q || "");
+        const leText  = norm(built.collabLe_text  || "");
+        const leQ     = norm(built.collabLe_q     || "");
 
-      if (col) drawOverlayBox(p6, fonts, col, L.p6WorkWith.collabCol);
-      if (le)  drawOverlayBox(p6, fonts, le,  L.p6WorkWith.collabLe);
+        if (colText) drawOverlayBox(p6, fonts, colText, L.p6WorkWith.collabCol_text);
+        if (colQ)    drawOverlayBox(p6, fonts, colQ,    L.p6WorkWith.collabCol_q);
+        if (leText)  drawOverlayBox(p6, fonts, leText,  L.p6WorkWith.collabLe_text);
+        if (leQ)     drawOverlayBox(p6, fonts, leQ,     L.p6WorkWith.collabLe_q);
+      }
+      // else: leave page 6 blank
     }
 
     // p7: actions (tips split into 3)
@@ -490,7 +638,7 @@ export default async function handler(req, res) {
 
     const bytes = await pdfDoc.save();
 
-    const outName = S(q.out || `CTRL_180_${P.name || "Perspective"}_${P.dateLbl || ""}.pdf`)
+    const outName = S(req.query?.out || `CTRL_180_${P.name || "Perspective"}_${P.dateLbl || ""}.pdf`)
       .replace(/[^\w.-]+/g, "_");
 
     // Response headers
@@ -500,7 +648,7 @@ export default async function handler(req, res) {
     res.setHeader("X-CTRL-CHART", chartUrl ? "1" : "0");
     res.setHeader("X-CTRL-CHART-TARGET", "p4");
     res.setHeader("X-CTRL-CHART-FETCH", chartFetch?.ok ? "ok" : (chartFetch?.reason || "no"));
-    res.setHeader("X-CTRL-WORKWITH", P.workWith ? "1" : "0");
+    res.setHeader("X-CTRL-WORKWITH", (isObj(P.workWithBuilt) ? "1" : "0"));
     res.setHeader("X-CTRL-DEBUG", "0");
 
     res.setHeader("Content-Type", "application/pdf");
