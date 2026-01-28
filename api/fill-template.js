@@ -1,5 +1,5 @@
 /**
- * CTRL 180 Export Service · fill-template (V3 — CHART MOVED TO PAGE 4)
+ * CTRL 180 Export Service · fill-template (V4 — Frequency auto-flow across 2 boxes)
  * Path: /pages/api/fill-template.js  (ctrl-180-service)
  *
  * Required:
@@ -67,7 +67,7 @@ const DEFAULT_LAYOUT = {
     p4Text: {
       frequency: { x: 25, y: 80, w: 160, h: 240, size: 15, align: "left", maxLines: 30 },
       frequency2: { x: 25, y: 390, w: 550, h: 420, size: 16, align: "left", maxLines: 23 },
-      chart: { x: 250, y: 160, w: 320, h: 320 }, // ✅ chart target (V3 uses this on Page 4)
+      chart: { x: 250, y: 160, w: 320, h: 320 }, // chart target (page 4)
     },
 
     p5Text: {
@@ -213,6 +213,63 @@ function drawOverlayBox(page, fonts, text, spec = {}) {
     }
 
     pushLine(line, { font: fontReg, fSize: size, indent: 0 });
+  }
+}
+
+/* ───────────── V4 helpers: auto-flow text across 2 boxes ───────────── */
+function wrapTextToLines(font, text, w, size) {
+  const hard = norm(text || "");
+  if (!hard) return [];
+
+  const widthOf = (s) => font.widthOfTextAtSize(s, Math.max(1, size));
+  const rawLines = hard.split(/\n/);
+  const out = [];
+
+  for (const raw of rawLines) {
+    const ln = raw.trim();
+    if (!ln) { out.push(""); continue; } // preserve blank line spacing
+
+    const words = ln.split(/\s+/);
+    let cur = "";
+    for (let i = 0; i < words.length; i++) {
+      const nxt = cur ? `${cur} ${words[i]}` : words[i];
+      if (widthOf(nxt) <= w || !cur) cur = nxt;
+      else { out.push(cur); cur = words[i]; }
+    }
+    out.push(cur);
+  }
+  return out;
+}
+
+function drawOverlayFromLines(page, font, lines, spec = {}) {
+  if (!page || !lines || !lines.length) return;
+
+  const {
+    x = 40, y = 40, w = 540,
+    size = 15, lineGap = 6,
+    color = rgb(0, 0, 0),
+    align = "left",
+    maxLines = 120
+  } = spec;
+
+  const widthOf = (s) => font.widthOfTextAtSize(s, Math.max(1, size));
+  const lineHeight = Math.max(1, size) + lineGap;
+
+  const pageH = page.getHeight();
+  let yCursor = pageH - y;
+
+  const out = lines.slice(0, maxLines);
+
+  for (const ln of out) {
+    if (!ln) { yCursor -= lineHeight; continue; }
+
+    let xDraw = x;
+    const wLn = widthOf(ln);
+    if (align === "center") xDraw = x + (w - wLn) / 2;
+    else if (align === "right") xDraw = x + (w - wLn);
+
+    page.drawText(ln, { x: xDraw, y: yCursor - size, size: Math.max(1, size), font, color });
+    yCursor -= lineHeight;
   }
 }
 
@@ -395,7 +452,7 @@ export default async function handler(req, res) {
     const p1 = pageOrNull(pages, 0);
     const p2 = pageOrNull(pages, 1);
     const p3 = pageOrNull(pages, 2);
-    const p4 = pageOrNull(pages, 3); // ✅ chart will render here in V3
+    const p4 = pageOrNull(pages, 3);
     const p5 = pageOrNull(pages, 4);
     const p6 = pageOrNull(pages, 5);
     const p7 = pageOrNull(pages, 6);
@@ -420,12 +477,8 @@ export default async function handler(req, res) {
     putHeader(p7, L.p7.hdrName);
     putHeader(p8, L.p8.hdrName);
 
-    // ─────────────────────────────────────────────────────────────
-    // ✅ V3 CHANGE: Chart moved to Page 4 using DEFAULT_LAYOUT.pages.p4Text.chart
-    // ─────────────────────────────────────────────────────────────
+    // chart on page 4
     const CHART4 = { ...L.p4Text.chart };
-
-    // optional query overrides (kept)
     if (q.cx != null) CHART4.x = N(q.cx, CHART4.x);
     if (q.cy != null) CHART4.y = N(q.cy, CHART4.y);
     if (q.cw != null) CHART4.w = N(q.cw, CHART4.w);
@@ -452,9 +505,26 @@ export default async function handler(req, res) {
       drawOverlayBox(p3, fonts, P.summary, L.p3Text.summary);
     }
 
-    // p4: frequency (big region) — chart now also on p4
+    // p4: frequency (V4 auto-flow across frequency -> frequency2)
     if (p4 && P.frequency) {
-      drawOverlayBox(p4, fonts, P.frequency, L.p4Text.frequency);
+      const spec1 = L.p4Text.frequency;   // narrow column
+      const spec2 = L.p4Text.frequency2;  // big box
+
+      // Wrap to box1 width/size
+      const allLines1 = wrapTextToLines(fonts.reg, P.frequency, spec1.w, spec1.size);
+      const cap1 = Number.isFinite(+spec1.maxLines) ? +spec1.maxLines : 30;
+      const firstLines = allLines1.slice(0, cap1);
+      const restLines  = allLines1.slice(firstLines.length);
+
+      drawOverlayFromLines(p4, fonts.reg, firstLines, spec1);
+
+      // Anything left goes into box2 (re-wrap to box2 width/size)
+      if (restLines.length) {
+        const restText = restLines.join("\n");
+        const allLines2 = wrapTextToLines(fonts.reg, restText, spec2.w, spec2.size);
+        const cap2 = Number.isFinite(+spec2.maxLines) ? +spec2.maxLines : 23;
+        drawOverlayFromLines(p4, fonts.reg, allLines2.slice(0, cap2), spec2);
+      }
     }
 
     // p5: sequence + theme
