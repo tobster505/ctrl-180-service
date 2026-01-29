@@ -497,7 +497,17 @@ export default async function handler(req, res) {
 
     const P = {
       name:    norm(src?.person?.fullName || src?.fullName || "Perspective Overlay"),
-      dateLbl: norm(src?.dateLbl || ""),
+      // V8 (date-only): broaden date label sources to match user v12.3 payloads
+      dateLbl: norm(
+        src?.dateLbl ||
+        src?.identity?.dateLabel ||
+        src?.identity?.dateLbl ||
+        src?.person?.dateLabel ||
+        src?.person?.dateLbl ||
+        src?.date ||
+        src?.Date ||
+        ""
+      ),
 
       // Legacy blocks (still supported)
       summary:   norm(T?.summary   || src?.summary   || ""),
