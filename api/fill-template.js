@@ -72,8 +72,8 @@ const DEFAULT_LAYOUT = {
 
     // Page 4 — Overview split + chart target (chart embed block stays unchanged)
     p4Text: {
-      ctrl_overview_text: { x: 25, y: 160, w: 170, h: 240, size: 15, align: "left", maxLines: 30 },
-      ctrl_overview_q:    { x: 25, y: 540, w: 550, h: 420, size: 16, align: "left", maxLines: 23 },
+      ctrl_overview_text: { x: 25, y: 155, w: 180, h: 240, size: 15, align: "left", maxLines: 30 },
+      ctrl_overview_q:    { x: 25, y: 560, w: 550, h: 420, size: 16, align: "left", maxLines: 23 },
       chart: { x: 250, y: 160, w: 320, h: 320 },
     },
 
@@ -91,11 +91,11 @@ const DEFAULT_LAYOUT = {
 
     // Page 6 — WorkWith split, BUT we will only render if Gen provides it
     p6WorkWith: {
-      collabCol_text: { x: 30,  y: 260, w: 270, h: 170, size: 15, align: "left", maxLines: 6 },
-      collabCol_q:    { x: 30,  y: 440, w: 270, h: 280, size: 15, align: "left", maxLines: 10 },
+      collabCol_text: { x: 30,  y: 280, w: 270, h: 170, size: 15, align: "left", maxLines: 6 },
+      collabCol_q:    { x: 30,  y: 460, w: 270, h: 280, size: 15, align: "left", maxLines: 10 },
 
-      collabLe_text:  { x: 320, y: 260, w: 260, h: 170, size: 15, align: "left", maxLines: 6 },
-      collabLe_q:     { x: 320, y: 440, w: 260, h: 280, size: 15, align: "left", maxLines: 10 },
+      collabLe_text:  { x: 320, y: 280, w: 260, h: 170, size: 15, align: "left", maxLines: 6 },
+      collabLe_q:     { x: 320, y: 460, w: 260, h: 280, size: 15, align: "left", maxLines: 10 },
 
       // legacy combined (kept but NOT used in Gen-or-blank mode)
       collabCol: { x: 30,  y: 300, w: 270, h: 420, size: 15, align: "left", maxLines: 14 },
