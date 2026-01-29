@@ -1,10 +1,15 @@
 /**
- * CTRL 180 Export Service · fill-template (V6.1 — coord overrides + split text/Q blocks + WorkWith = Gen-or-blank)
+ * CTRL 180 Export Service · fill-template (V7 — AUTO-SELECT TEMPLATE FIRST + ignore q.tpl by default)
  *
- * ✅ Chart block is intentionally unchanged from your V5 (same fetch/embed + cx/cy/cw/ch overrides).
+ * ✅ Chart block is intentionally unchanged from your V5/V6.x (same fetch/embed + cx/cy/cw/ch overrides).
  * ✅ Every text area supports per-box coordinate overrides (x/y/w/h/size/maxLines/align + dx/dy).
  * ✅ Paragraph blocks + Question blocks are separate boxes (so you can move them independently).
  * ✅ WorkWith will ONLY render if Gen provides it; otherwise page 6 stays blank (no fallbacks, no invention).
+ *
+ * NEW in V7:
+ * ✅ Template selection is payload-driven (dominant + second) and is the PRIMARY path.
+ * ✅ q.tpl is ignored by default; only honoured when override=1 (or debug=1).
+ * ✅ safeCombo whitelist prevents unexpected template loads.
  */
 
 export const config = { runtime: "nodejs" };
@@ -131,6 +136,58 @@ async function readPayload(req) {
     } catch {}
   }
   return {};
+}
+
+/* ───────────── template auto-select helpers (V7) ───────────── */
+function resolveStateKey(any) {
+  const raw = S(any, "").trim();
+  if (!raw) return null;
+
+  // direct key
+  const up = raw.toUpperCase();
+  if (["C","T","R","L"].includes(up)) return up;
+
+  // from label-ish text
+  const low = raw.toLowerCase();
+  if (low.includes("concealed")) return "C";
+  if (low.includes("triggered")) return "T";
+  if (low.includes("regulated")) return "R";
+  if (low.includes("lead")) return "L";
+
+  // first-char fallback (e.g. "Triggered (Developing)" -> T)
+  const c = up.charAt(0);
+  if (["C","T","R","L"].includes(c)) return c;
+
+  return null;
+}
+
+function computeDomSecondFromPayload(src) {
+  const domKey =
+    resolveStateKey(src?.dominantKey) ||
+    resolveStateKey(src?.domKey) ||
+    resolveStateKey(src?.dominantLabel) ||
+    resolveStateKey(src?.domLabel) ||
+    resolveStateKey(src?.dominantState) ||
+    resolveStateKey(src?.domState) ||
+    resolveStateKey(src?.subject?.dominantKey) ||
+    resolveStateKey(src?.subject?.domKey) ||
+    null;
+
+  const secondKey =
+    resolveStateKey(src?.secondKey) ||
+    resolveStateKey(src?.secKey) ||
+    resolveStateKey(src?.secondLabel) ||
+    resolveStateKey(src?.secondLabel) ||
+    resolveStateKey(src?.secondState) ||
+    resolveStateKey(src?.subject?.secondKey) ||
+    resolveStateKey(src?.subject?.secKey) ||
+    null;
+
+  return {
+    dominantKey: domKey,
+    secondKey: secondKey,
+    templateKey: domKey && secondKey ? `${domKey}${secondKey}` : ""
+  };
 }
 
 /* ───────────── drawing helpers ───────────── */
@@ -377,22 +434,49 @@ export default async function handler(req, res) {
   let chartFetch = { ok:false, reason:"not_attempted", url:"", contentType:"", bytes:null };
   let payloadSize = 0;
 
+  // V7 debug extras
+  let tplDecision = null;
+  let domSecond = null;
+
   try {
     const q = req.method === "POST" ? (req.body || {}) : (req.query || {});
     const debugMode = String(q.debug || "").trim() === "1";
 
     const FALLBACK_TPL = "CTRL_PoC_180_Assessment_Report_template_fallback.pdf";
 
-    tpl = S(q.tpl || "").trim();
-    tpl = tpl.replace(/[^A-Za-z0-9._-]/g, "");
+    // Read payload FIRST so auto-select is primary
+    const src = await readPayload(req);
+    payloadSize = Buffer.byteLength(JSON.stringify(src || {}), "utf8");
+
+    // Auto-select (primary)
+    domSecond = computeDomSecondFromPayload(src || {});
+    const validCombos = new Set(["CT","CL","CR","TC","TR","TL","RC","RT","RL","LC","LR","LT"]);
+    const safeCombo = validCombos.has(domSecond.templateKey) ? domSecond.templateKey : "CT";
+
+    const computedTpl = `CTRL_PoC_180_Assessment_Report_template_${safeCombo}.pdf`;
+
+    // Ignore q.tpl by default; only allow in override mode
+    const allowOverride = String(q.override || "").trim() === "1" || debugMode;
+    const requestedTpl = S(q.tpl || "").trim().replace(/[^A-Za-z0-9._-]/g, "");
+
+    tpl = computedTpl;
+    if (allowOverride && requestedTpl) tpl = requestedTpl;
 
     usingFallback = !tpl;
     if (usingFallback) tpl = FALLBACK_TPL;
 
-    const pdfBytes = await loadTemplateBytesLocal(tpl);
+    tplDecision = {
+      allowOverride,
+      requestedTpl: requestedTpl || null,
+      dominantKey: domSecond.dominantKey || null,
+      secondKey: domSecond.secondKey || null,
+      templateKey: domSecond.templateKey || null,
+      safeCombo,
+      computedTpl,
+      finalTpl: tpl
+    };
 
-    const src = await readPayload(req);
-    payloadSize = Buffer.byteLength(JSON.stringify(src || {}), "utf8");
+    const pdfBytes = await loadTemplateBytesLocal(tpl);
 
     // Prefer textV2, then text, then fields, then top-level
     const T = isObj(src?.textV2) ? src.textV2 : (isObj(src?.text) ? src.text : (isObj(src?.fields) ? src.fields : {}));
@@ -470,6 +554,7 @@ export default async function handler(req, res) {
         debug: true,
         tpl,
         usingFallback,
+        tplDecision,
         received: {
           person: src?.person || null,
           dateLbl: src?.dateLbl || null,
