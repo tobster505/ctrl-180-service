@@ -109,9 +109,9 @@ const DEFAULT_LAYOUT = {
 
     // Page 7 — Actions (from tips split into 3)
     p7Actions: {
-      act1: { x: 50,  y: 200, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
-      act2: { x: 100, y: 390, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
-      act3: { x: 50,  y: 570, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
+      act1: { x: 50,  y: 170, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
+      act2: { x: 100, y: 380, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
+      act3: { x: 50,  y: 590, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
     },
   },
 };
