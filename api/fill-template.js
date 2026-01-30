@@ -70,8 +70,8 @@ const DEFAULT_LAYOUT = {
 
     // Page 3 — Exec Summary split into paragraph + questions (fallback to legacy block if needed)
     p3Text: {
-      exec_summary_text: { x: 25, y: 360, w: 550, h: 170, size: 16, align: "left", maxLines: 10 },
-      exec_summary_q:    { x: 25, y: 540, w: 550, h: 170, size: 16, align: "left", maxLines: 10 },
+      exec_summary_text: { x: 25, y: 400, w: 550, h: 170, size: 16, align: "left", maxLines: 10 },
+      exec_summary_q:    { x: 25, y: 580, w: 550, h: 170, size: 16, align: "left", maxLines: 10 },
       summary:           { x: 25, y: 380, w: 550, h: 250, size: 16, align: "left", maxLines: 13 }, // legacy
     },
 
@@ -87,8 +87,8 @@ const DEFAULT_LAYOUT = {
       sequence_text: { x: 25, y: 140, w: 550, h: 150, size: 16, align: "left", maxLines: 8 },
       sequence_q:    { x: 25, y: 300, w: 550, h: 140, size: 16, align: "left", maxLines: 7 },
 
-      theme_text:    { x: 25, y: 500, w: 550, h: 80,  size: 16, align: "left", maxLines: 4 },
-      theme_q:       { x: 25, y: 590, w: 550, h: 120, size: 16, align: "left", maxLines: 6 },
+      theme_text:    { x: 25, y: 470, w: 550, h: 80,  size: 16, align: "left", maxLines: 4 },
+      theme_q:       { x: 25, y: 560, w: 550, h: 120, size: 16, align: "left", maxLines: 6 },
 
       sequence: { x: 25, y: 140, w: 550, h: 240, size: 16, align: "left", maxLines: 13 }, // legacy
       theme:    { x: 25, y: 540, w: 550, h: 160, size: 16, align: "left", maxLines: 9 },  // legacy
@@ -109,9 +109,9 @@ const DEFAULT_LAYOUT = {
 
     // Page 7 — Actions (from tips split into 3)
     p7Actions: {
-      act1: { x: 50,  y: 320, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
-      act2: { x: 100, y: 470, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
-      act3: { x: 50,  y: 610, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
+      act1: { x: 50,  y: 250, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
+      act2: { x: 100, y: 400, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
+      act3: { x: 50,  y: 550, w: 440, h: 95, size: 17, align: "left", maxLines: 5 },
     },
   },
 };
